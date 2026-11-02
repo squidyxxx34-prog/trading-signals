@@ -5,9 +5,10 @@ timezone: Europe/Paris
 
 timeframe: 15m         # TF du graphique (5m, 15m, 30m, 60m)
 htf: 60m               # TF de confirmation (= "60" dans le Pine)
+scan_delay_sec: 20     # scan X s après chaque clôture de bougie
+max_signal_age_min: 30 # ignore un signal si la bougie a clôturé il y a plus de X min
 
-# Topic ntfy (gratuit, sans compte) : abonne-toi à ce nom dans l'app ntfy. Garde le repo privé.
-ntfy_topic: confluence-1aeaec42ca
+# Topic ntfy : secret GitHub NTFY_TOPIC (repo public -> jamais en clair ici)
 
 params:
   fast_len: 50
@@ -21,21 +22,28 @@ params:
   atr_len: 14
   atr_mult: 1.5
 
-# ticker = symbole Yahoo Finance ; point_value = gain par lot MT5 pour 1.0 de mouvement de prix
-# currency_rate = conversion vers € (compte en €, symbole coté en USD -> ~0.86)
-symbols:
-  - name: EURUSD
-    ticker: EURUSD=X
-    point_value: 100000
-    currency_rate: 0.86
-    decimals: 5
-  - name: XAUUSD
-    ticker: GC=F        # futures or (proche du spot, écart de quelques $)
-    point_value: 100
-    currency_rate: 0.86
-    decimals: 2
-  # - name: US100
-  #   ticker: NQ=F
-  #   point_value: 1     # dépend de ton broker (taille de contrat MT5)
-  #   currency_rate: 0.86
-  #   decimals: 1
+# ticker = symbole Yahoo Finance
+# point_value = gain par lot MT5 pour 1.0 de mouvement de prix (= taille de contrat de TON broker, à vérifier)
+# currency_rate = conversion vers € (coté en USD -> ~0.86, coté en € -> 1)
+gold:
+  - {name: XAUUSD, ticker: GC=F, point_value: 100, currency_rate: 0.86, decimals: 2}
+
+indices:
+  - {name: US500,  ticker: ^GSPC,     point_value: 1, currency_rate: 0.86, decimals: 1}
+  - {name: US100,  ticker: ^NDX,      point_value: 1, currency_rate: 0.86, decimals: 1}
+  - {name: US30,   ticker: ^DJI,      point_value: 1, currency_rate: 0.86, decimals: 1}
+  - {name: US2000, ticker: ^RUT,      point_value: 1, currency_rate: 0.86, decimals: 1}
+  - {name: GER40,  ticker: ^GDAXI,    point_value: 1, currency_rate: 1,    decimals: 1}
+  - {name: FRA40,  ticker: ^FCHI,     point_value: 1, currency_rate: 1,    decimals: 1}
+  - {name: EU50,   ticker: ^STOXX50E, point_value: 1, currency_rate: 1,    decimals: 1}
+  - {name: UK100,  ticker: ^FTSE,     point_value: 1, currency_rate: 1.17, decimals: 1}
+  - {name: JP225,  ticker: ^N225,     point_value: 1, currency_rate: 0.0057, decimals: 0}
+  - {name: HK50,   ticker: ^HSI,      point_value: 1, currency_rate: 0.11, decimals: 0}
+
+# 15 actions US du moment = plus gros volumes du jour (screener Yahoo), mises à jour chaque jour
+stocks:
+  count: 15
+  min_price: 5           # exclut les penny stocks
+  point_value: 1         # CFD action MT5 : 1 lot = 1 action (vérifie chez ton broker)
+  currency_rate: 0.86
+  fallback: [NVDA, TSLA, AAPL, AMD, PLTR, AMZN, MSFT, META, GOOGL, AVGO, NFLX, COIN, MSTR, SMCI, INTC]

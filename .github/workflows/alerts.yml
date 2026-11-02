@@ -1,8 +1,10 @@
 name: Confluence alerts
 
+# Boucle quasi continue : chaque run scanne ~20 s après chaque clôture 15m pendant 5h45,
+# le cron horaire en garde toujours un en attente pour enchaîner (repo public = minutes illimitées).
 on:
   schedule:
-    - cron: "2,17,32,47 6-21 * * 1-5"   # 2 min après chaque clôture 15m, 7h-22h Paris, lun-ven (~1400 min/mois, gratuit même en privé)
+    - cron: "7 * * * 0-5"   # dim soir -> ven (marchés fermés le samedi)
   workflow_dispatch:
     inputs:
       test:
@@ -14,13 +16,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: alerts
+  group: alerts-${{ inputs.test && 'test' || 'loop' }}
   cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,16 +30,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Scan
+      - name: Scan en boucle
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py ${{ inputs.test && '--test' || '' }}
-      - name: Save state
+          LOOP_MINUTES: "345"
+          PYTHONUNBUFFERED: "1"
         run: |
-          [ -f state.json ] || exit 0
           git config user.name "alert-bot"
           git config user.email "alert-bot@users.noreply.github.com"
-          git add state.json
-          git diff --cached --quiet || (git commit -m "state" -q && git push -q)
+          python bot.py ${{ inputs.test && '--test' || '' }}
