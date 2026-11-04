@@ -1,0 +1,46 @@
+# ===== SMC Pro v2 -> notifs ntfy (mêmes critères que le script Pine) =====
+capital: 6000          # € (comme le réglage « Capital » du Pine)
+risk_pct: 1.0          # % risqué par trade (comme « Risque par trade »)
+timezone: Europe/Paris
+
+timeframe: 1h          # 1h recommandé (15m possible, mais les frais mangent l'edge)
+model: continuation    # continuation | reversal   (= « Modèle » du Pine)
+reversal_killzone_only: true
+notify_fill: false     # true = notif aussi quand l'ordre limite est rempli
+scan_delay_sec: 60     # scan 60 s après chaque clôture (+ un 2e passage à +5 min)
+max_signal_age_min: 90 # ignore un signal trop vieux pour être encore jouable
+
+# Topic ntfy : secret GitHub NTFY_TOPIC (repo public -> jamais en clair ici)
+
+# Réglages IDENTIQUES aux valeurs par défaut du script Pine SMC Pro v2
+params:
+  lint: 3          # Pivots internes
+  lsw: 10          # Pivots swing
+  htf_len: 50      # EMA HTF (journalière)
+  fvg_min: 0.2     # Taille min FVG (x ATR)
+  fvg_pick: first
+  entry: fvg_top   # FVG (bord)   [fvg_ce = FVG 50%, ob_top = OB (bord), ob_mid = OB 50%]
+  pd_filter: false
+  sl_buf: 0.2      # Marge SL (x ATR)
+  rr: 3.0          # Take-profit (R)
+  max_wait: 10     # Validité de l'ordre limite (bougies)
+  max_hold: 120    # Sortie au temps (bougies)
+  min_risk: 0.25
+  max_risk: 4.0
+
+# Forex + métaux uniquement (CFD). ticker = symbole Yahoo Finance.
+# contract = unités pour 1 lot (forex 100 000, or 100 oz, argent 5 000 oz : vérifie chez ton broker)
+# currency_rate = conversion de la devise de cotation vers € (approx., à ajuster)
+symbols:
+  - {name: EURUSD, ticker: EURUSD=X, contract: 100000, currency_rate: 0.89,  decimals: 5}
+  - {name: GBPUSD, ticker: GBPUSD=X, contract: 100000, currency_rate: 0.89,  decimals: 5}
+  - {name: AUDUSD, ticker: AUDUSD=X, contract: 100000, currency_rate: 0.89,  decimals: 5}
+  - {name: NZDUSD, ticker: NZDUSD=X, contract: 100000, currency_rate: 0.89,  decimals: 5}
+  - {name: USDJPY, ticker: JPY=X,    contract: 100000, currency_rate: 0.006, decimals: 3}
+  - {name: USDCHF, ticker: CHF=X,    contract: 100000, currency_rate: 1.07,  decimals: 5}
+  - {name: USDCAD, ticker: CAD=X,    contract: 100000, currency_rate: 0.64,  decimals: 5}
+  - {name: EURGBP, ticker: EURGBP=X, contract: 100000, currency_rate: 1.17,  decimals: 5}
+  - {name: EURJPY, ticker: EURJPY=X, contract: 100000, currency_rate: 0.006, decimals: 3}
+  - {name: GBPJPY, ticker: GBPJPY=X, contract: 100000, currency_rate: 0.006, decimals: 3}
+  - {name: XAUUSD, ticker: GC=F,     contract: 100,    currency_rate: 0.89,  decimals: 2, note: "Prix = futures or COMEX : décale tes niveaux de l'écart avec ton XAUUSD"}
+  - {name: XAGUSD, ticker: SI=F,     contract: 5000,   currency_rate: 0.89,  decimals: 3, note: "Prix = futures argent COMEX : décale tes niveaux de l'écart avec ton XAGUSD"}

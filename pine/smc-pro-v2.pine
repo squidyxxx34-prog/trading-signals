@@ -1,0 +1,867 @@
+//@version=6
+// ════════════════════════════════════════════════════════════════════════════
+//  SMC PRO v2 — Order Blocks · FVG / iFVG · Breakers · BOS / CHoCH · Liquidité
+//               Premium / Discount · Killzones · Signaux BUY / SELL · Backtest
+// ────────────────────────────────────────────────────────────────────────────
+//  CE QUI EST DESSINÉ (règles ICT / SMC standard) :
+//   • Structure : pivots internes (courts) + swing (longs). BOS = cassure dans
+//     le sens de la tendance, CHoCH = première cassure contre la tendance. Une
+//     cassure n'est validée qu'en CLÔTURE (une mèche ne suffit pas).
+//   • Order Block : la bougie extrême de la jambe qui a cassé la structure
+//     (dernier creux avant l'impulsion haussière / dernier sommet avant la
+//     baissière). Zone = mèche à mèche. Clôture au-delà = OB invalidé → il
+//     devient un BREAKER (rôle inversé, pointillés).
+//   • FVG : 3 bougies, bas de la 3e > haut de la 1re (haussier) ou l'inverse.
+//     Taille min = x ATR. Il rétrécit quand le prix le comble, disparaît quand
+//     il est comblé ; clôture à travers = iFVG (FVG inversé, rôle inversé).
+//   • Liquidité : EQH / EQL (sommets / creux égaux à x ATR près). « $ » = sweep
+//     (le prix prend la liquidité puis réintègre en clôture).
+//   • Premium / Discount : moitié haute / basse du range swing en cours.
+//   • Killzones : Londres 02:00-05:00 et New York 07:00-11:00 (heure de NY).
+//
+//  SIGNAUX (ordre LIMITE sur le POI, SL derrière l'extrême, TP en R) :
+//   • Continuation : cassure interne dans le sens du biais (HTF + swing) avec
+//     displacement (FVG frais) → BUY LIMIT au bord du FVG.
+//   • Reversal A+ (modèle ICT 2022) : sweep de liquidité + CHoCH interne +
+//     FVG, en killzone, dans le sens du biais.
+//   « BUY LIMIT » = ordre à placer · « BUY » = ordre rempli · +xR / -1R = sortie.
+//
+//  CRÉDIBILITÉ : chaque signal est suivi en walk-forward (aucune donnée future,
+//  calcul à la clôture, pas de TP sur la bougie d'entrée, SL prioritaire si SL
+//  et TP sur la même bougie, gaps à l'open, frais déduits). Le tableau compare
+//  les signaux à un PLACEBO (entrées au hasard avec les mêmes filtres et le même
+//  risque) : si les signaux ne battent pas le placebo, l'edge n'existe pas sur
+//  cet actif / ce timeframe, et le tableau le dit.
+// ════════════════════════════════════════════════════════════════════════════
+indicator("SMC Pro v2", shorttitle = "SMC Pro v2", overlay = true, max_labels_count = 500, max_boxes_count = 500, max_lines_count = 500, max_bars_back = 1000)
+
+// ─── INPUTS ─────────────────────────────────────────────────────────────────
+G1 = "Signaux BUY / SELL"
+iModel   = input.string("Continuation (tendance)", "Modèle", options = ["Continuation (tendance)", "Reversal A+ (ICT 2022)", "Les deux", "Aucun"], group = G1)
+iEntry   = input.string("FVG (bord)", "Entrée (ordre limite)", options = ["FVG (bord)", "FVG 50%", "OB (bord)", "OB 50%"], group = G1)
+iExit    = input.string("TP fixe", "Sortie", options = ["TP fixe", "Stop suiveur ATR"], group = G1)
+iRR      = input.float(3.0, "Take-profit (R)", minval = 0.5, step = 0.25, group = G1)
+iTrailM  = input.float(3.0, "Stop suiveur (x ATR)", minval = 0.5, step = 0.25, group = G1)
+iSlBuf   = input.float(0.2, "Marge SL derrière l'extrême (x ATR)", minval = 0.0, step = 0.05, group = G1)
+iMaxWait = input.int(10, "Validité de l'ordre limite (bougies)", minval = 1, group = G1)
+iMaxHold = input.int(120, "Sortie au temps (bougies)", minval = 5, group = G1)
+iMinRisk = input.float(0.25, "Risque min (x ATR)", minval = 0.05, step = 0.05, group = G1)
+iMaxRisk = input.float(4.0, "Risque max (x ATR)", minval = 0.5, step = 0.25, group = G1)
+iPD      = input.bool(false, "Entrée en discount (BUY) / premium (SELL) de la jambe", group = G1)
+iFee     = input.float(0.05, "Frais + spread aller-retour (%)", minval = 0.0, step = 0.01, group = G1)
+
+G2 = "Biais"
+iUseHtf   = input.bool(true, "Filtre tendance HTF (clôture vs EMA)", group = G2)
+iHtfTf    = input.timeframe("D", "Timeframe HTF", group = G2)
+iHtfLen   = input.int(50, "EMA HTF", minval = 5, group = G2)
+iUseSwing = input.bool(true, "Filtre structure swing", group = G2)
+iKzRev    = input.bool(true, "Reversal A+ : MSS en killzone uniquement", group = G2)
+
+G3 = "Structure"
+iLint   = input.int(3, "Pivots internes", minval = 2, maxval = 10, group = G3)
+iLsw    = input.int(10, "Pivots swing", minval = 4, maxval = 50, group = G3)
+iFvgMin = input.float(0.2, "Taille min FVG (x ATR)", minval = 0.0, step = 0.05, group = G3)
+iEqTol  = input.float(0.1, "Tolérance EQH / EQL (x ATR)", minval = 0.01, step = 0.01, group = G3)
+
+G4 = "Affichage"
+iShowInt   = input.bool(false, "BOS / CHoCH internes", group = G4)
+iShowSw    = input.bool(true, "BOS / CHoCH swing", group = G4)
+iShowOB    = input.bool(true, "Order Blocks", group = G4)
+iObN       = input.int(3, "OB affichés par côté", minval = 1, maxval = 15, group = G4)
+iShowBrk   = input.bool(true, "Breakers (OB invalidés)", group = G4)
+iShowFVG   = input.bool(true, "FVG", group = G4)
+iFvgN      = input.int(3, "FVG affichés par côté", minval = 1, maxval = 20, group = G4)
+iShowIFVG  = input.bool(true, "iFVG (FVG inversés)", group = G4)
+iShowLiq   = input.bool(true, "Liquidité EQH / EQL + sweeps", group = G4)
+iShowPD    = input.bool(true, "Premium / Discount", group = G4)
+iShowKZ    = input.bool(false, "Killzones (fond)", group = G4)
+iShowTable = input.bool(true, "Tableau de performance", group = G4)
+iTblPos    = input.string("Bas droite", "Position du tableau", options = ["Haut droite", "Bas droite", "Bas gauche"], group = G4)
+iShowAct   = input.bool(true, "Consigne « quoi faire » à droite du prix", group = G4)
+iCapital   = input.float(6000, "Capital", minval = 100, group = G4)
+iRiskPct   = input.float(1.0, "Risque par trade (%)", minval = 0.1, step = 0.1, group = G4)
+iPlStep    = input.int(5, "Placebo : 1 entrée toutes les N bougies", minval = 1, group = G4)
+cBull = input.color(#089981, "Haussier", group = G4)
+cBear = input.color(#F23645, "Baissier", group = G4)
+
+G5 = "Notifications ntfy"
+iNtfy      = input.bool(true, "Envoyer sur ntfy (webhook https://ntfy.sh)", group = G5)
+iTopic     = input.string("maxence-smc-cfd", "Topic ntfy (même nom que dans l'app)", group = G5)
+iScope     = input.string("Forex + métaux", "Marchés autorisés", options = ["Forex + métaux", "Tous les CFD"], group = G5)
+iNotifFill = input.bool(false, "Notifier aussi quand l'ordre est rempli", group = G5)
+
+// ─── BASE ───────────────────────────────────────────────────────────────────
+cGray = #787B86
+atr   = ta.atr(14)
+
+f_ph(int L) =>
+    high[L] > ta.highest(high, L) and high[L] >= ta.highest(high, L)[L + 1]
+f_pl(int L) =>
+    low[L] < ta.lowest(low, L) and low[L] <= ta.lowest(low, L)[L + 1]
+
+iph = f_ph(iLint)
+ipl = f_pl(iLint)
+sph = f_ph(iLsw)
+spl = f_pl(iLsw)
+
+// Biais HTF (dernière bougie HTF CLÔTURÉE → aucun repaint)
+f_htf() =>
+    e = ta.ema(close, iHtfLen)
+    s = na(e) ? 0 : close > e ? 1 : close < e ? -1 : 0
+    s[1]
+htfRaw   = request.security(syminfo.tickerid, iHtfTf, f_htf(), lookahead = barmerge.lookahead_on)
+htfOn    = iUseHtf and timeframe.in_seconds() < timeframe.in_seconds(iHtfTf)
+htfBias  = htfOn ? nz(htfRaw) : 0
+
+// Marchés autorisés pour les notifications (forex / métaux / CFD)
+string tk = str.upper(syminfo.ticker)
+bool isMetal = str.startswith(tk, "XAU") or str.startswith(tk, "XAG") or str.startswith(tk, "XPT") or str.startswith(tk, "XPD") or str.contains(tk, "GOLD") or str.contains(tk, "SILVER")
+bool isFx    = syminfo.type == "forex"
+bool isCfd   = syminfo.type == "cfd"
+bool notifOk = iScope == "Forex + métaux" ? isFx or isMetal : isFx or isMetal or isCfd
+
+inKz = not na(time(timeframe.period, "0200-0500:1234567", "America/New_York")) or not na(time(timeframe.period, "0700-1100:1234567", "America/New_York"))
+bgcolor(iShowKZ and inKz and timeframe.in_seconds() < 14400 ? color.new(#9C27B0, 93) : na, title = "Killzones")
+
+// ─── TYPES ──────────────────────────────────────────────────────────────────
+type Zone
+    box   bx
+    float top
+    float bot
+    int   dir       // 1 = support (haussier), -1 = résistance (baissier)
+    bool  flipped   // breaker / iFVG
+
+type Liq
+    line  ln
+    float lvl
+    int   dir       // 1 = EQH (liquidité au-dessus), -1 = EQL
+
+var array<Zone> obs   = array.new<Zone>()
+var array<Zone> fvgs  = array.new<Zone>()
+var array<Liq>  liqs  = array.new<Liq>()
+var array<line>  stLn = array.new<line>()
+var array<label> stLb = array.new<label>()
+
+f_trimDraw() =>
+    while array.size(stLn) > 80
+        line.delete(array.shift(stLn))
+    while array.size(stLb) > 80
+        label.delete(array.shift(stLb))
+
+f_struct(int fromBar, float lvl, int d, bool isChoch, bool isSwing) =>
+    color col = d == 1 ? cBull : cBear
+    array.push(stLn, line.new(fromBar, lvl, bar_index, lvl, color = color.new(col, isSwing ? 0 : 35), style = isSwing ? line.style_solid : line.style_dashed, width = 1))
+    array.push(stLb, label.new(int(math.round((fromBar + bar_index) / 2)), lvl, (isChoch ? "CHoCH" : "BOS"), style = d == 1 ? label.style_label_down : label.style_label_up, color = color.new(col, 100), textcolor = color.new(col, isSwing ? 0 : 30), size = isSwing ? size.small : size.tiny))
+    f_trimDraw()
+
+f_countDir(array<Zone> arr, int d) =>
+    int k = 0
+    for z in arr
+        if z.dir == d
+            k += 1
+    k
+
+f_trimZones(array<Zone> arr, int d, int maxN) =>
+    while f_countDir(arr, d) > maxN
+        int idx = -1
+        for k = 0 to array.size(arr) - 1
+            if array.get(arr, k).dir == d
+                idx := k
+                break
+        if idx >= 0
+            box.delete(array.get(arr, idx).bx)
+            array.remove(arr, idx)
+
+f_addOB(int leftBar, float top, float bot, int d) =>
+    bool dup = false
+    for z in obs
+        if not z.flipped and z.dir == d and z.top == top and z.bot == bot
+            dup := true
+    if not dup
+        color col = d == 1 ? cBull : cBear
+        bx = box.new(leftBar, top, bar_index + 5, bot, border_color = color.new(col, 40), bgcolor = color.new(col, 82), text = "OB", text_size = size.tiny, text_color = color.new(col, 20), text_halign = text.align_right)
+        array.push(obs, Zone.new(bx, top, bot, d, false))
+        f_trimZones(obs, d, iObN)
+
+// Bougie extrême de la jambe [pivBar+1 .. bar actuelle] → [offset, top, bot]
+f_legExtreme(int d, int pivBar) =>
+    int n = math.min(bar_index - (pivBar + 1), 300)
+    float ext = d == 1 ? low : high
+    int eo = 0
+    if n > 0
+        for k = 1 to n
+            if d == 1 ? low[k] <= ext : high[k] >= ext
+                ext := d == 1 ? low[k] : high[k]
+                eo := k
+    [eo, ext]
+
+// ─── ÉTAT ───────────────────────────────────────────────────────────────────
+// structure interne
+var float phV = na
+var int   phB = na
+var bool  phX = true
+var float plBeforePh = na
+var float plV = na
+var int   plB = na
+var bool  plX = true
+var float phBeforePl = na
+var int   tInt = 0
+// structure swing
+var float sphV = na
+var int   sphB = na
+var bool  sphX = true
+var float splV = na
+var int   splB = na
+var bool  splX = true
+var int   tSw = 0
+var float trTop = na
+var int   trTopB = na
+var float trBot = na
+var int   trBotB = na
+
+// ordre en attente (p*) et position (q*)
+var int   pDir = 0
+var float pE = na
+var float pSl = na
+var float pTp = na
+var float pAtr = na
+var int   pBar = na
+var int   pModel = 0
+var box   pBox = na
+var label pLab = na
+var int   qDir = 0
+var float qE = na
+var float qSl = na
+var float qTp = na
+var float qRk = na
+var float qSt = na
+var float qExt = na
+var float qAtr = na
+var int   qBar = na
+var int   qModel = 0
+var line  qSlLn = na
+var line  qTpLn = na
+
+// stats : 0 = Continuation, 1 = Reversal, 2 = Total, 3 = Placebo
+var array<int>   sN    = array.new_int(4, 0)
+var array<int>   sW    = array.new_int(4, 0)
+var array<float> sWin  = array.new_float(4, 0.0)
+var array<float> sLoss = array.new_float(4, 0.0)
+var float sumRiskAtr = 0.0
+var int   cntRiskAtr = 0
+// placebo
+var array<float> zE  = array.new_float()
+var array<float> zSl = array.new_float()
+var array<float> zTp = array.new_float()
+var array<float> zRk = array.new_float()
+var array<float> zSt = array.new_float()
+var array<float> zEx = array.new_float()
+var array<int>   zD  = array.new_int()
+var array<int>   zB  = array.new_int()
+
+f_rec(int m, float net) =>
+    for s in array.from(m, 2)
+        array.set(sN, s, array.get(sN, s) + 1)
+        if net > 0
+            array.set(sW, s, array.get(sW, s) + 1)
+            array.set(sWin, s, array.get(sWin, s) + net)
+        else
+            array.set(sLoss, s, array.get(sLoss, s) - net)
+
+f_recPl(float net) =>
+    array.set(sN, 3, array.get(sN, 3) + 1)
+    if net > 0
+        array.set(sW, 3, array.get(sW, 3) + 1)
+        array.set(sWin, 3, array.get(sWin, 3) + net)
+    else
+        array.set(sLoss, 3, array.get(sLoss, 3) - net)
+
+f_sgn(float x, string fmt) =>
+    (x >= 0 ? "+" : "") + str.tostring(x, fmt)
+
+f_exitMark(float px, float r) =>
+    label.new(bar_index, px, f_sgn(r, "#.#") + "R", style = label.style_label_center, color = color.new(r > 0 ? cBull : cBear, 15), textcolor = color.white, size = size.tiny)
+
+// Sortie d'une position : [r, prixSortie] ; r = na si toujours ouverte
+f_manage(int d, float e, float sl, float tp, float rk, float st, int fbar) =>
+    float r  = na
+    float px = na
+    if iExit == "TP fixe"
+        if d == 1
+            if open <= sl or open >= tp
+                r := (open - e) / rk
+                px := open
+            else if low <= sl
+                r := -1.0
+                px := sl
+            else if high >= tp
+                r := iRR
+                px := tp
+        else
+            if open >= sl or open <= tp
+                r := (e - open) / rk
+                px := open
+            else if high >= sl
+                r := -1.0
+                px := sl
+            else if low <= tp
+                r := iRR
+                px := tp
+    else
+        if d == 1
+            if open <= st
+                r := (open - e) / rk
+                px := open
+            else if low <= st
+                r := (st - e) / rk
+                px := st
+        else
+            if open >= st
+                r := (e - open) / rk
+                px := open
+            else if high >= st
+                r := (e - st) / rk
+                px := st
+    if na(r) and bar_index - fbar >= iMaxHold
+        r := d * (close - e) / rk
+        px := close
+    [r, px]
+
+f_pf(int s) =>
+    float l = array.get(sLoss, s)
+    float w = array.get(sWin, s)
+    l > 0 ? w / l : w > 0 ? 99.0 : 0.0
+
+f_avg(int s) =>
+    int n = array.get(sN, s)
+    n > 0 ? (array.get(sWin, s) - array.get(sLoss, s)) / n : 0.0
+
+// ─── SETUP (identique au moteur de backtest Python) ─────────────────────────
+// retourne [okCont, okRev, entrée, SL, TP, zoneHaut, zoneBas, offsetExtrême, swept]
+f_arm(int d, int prevT, int pivB, float liq, float a) =>
+    bool  okC = false
+    bool  okR = false
+    float e = na
+    float sl = na
+    float tp = na
+    float zt = na
+    float zb = na
+    int   eo = 0
+    bool  swept = false
+    bool biasOk = (not iUseSwing or tSw == d) and (not htfOn or htfBias == d)
+    if biasOk and bar_index > pivB
+        [eo_, ext] = f_legExtreme(d, pivB)
+        eo := eo_
+        swept := not na(liq) and (d == 1 ? ext < liq : ext > liq)
+        // jambe d'impulsion : extrême opposé depuis l'OB
+        float legX = d == 1 ? high : low
+        for k = 0 to eo
+            legX := d == 1 ? math.max(legX, high[k]) : math.min(legX, low[k])
+        // FVG frais le plus profond de la jambe (displacement)
+        float fTop = na
+        float fBot = na
+        float rnx = d == 1 ? 1e100 : -1e100
+        if eo >= 2
+            for k = 0 to eo - 2
+                float t = d == 1 ? low[k] : low[k + 2]
+                float b = d == 1 ? high[k + 2] : high[k]
+                bool fresh = d == 1 ? rnx > t : rnx < b
+                if t - b >= iFvgMin * a and fresh
+                    fTop := t
+                    fBot := b
+                rnx := d == 1 ? math.min(rnx, low[k]) : math.max(rnx, high[k])
+        if not na(fTop)
+            float obt = high[eo]
+            float obb = low[eo]
+            if d == 1
+                e := iEntry == "FVG (bord)" ? fTop : iEntry == "FVG 50%" ? (fTop + fBot) / 2 : iEntry == "OB (bord)" ? obt : (obt + obb) / 2
+                sl := ext - iSlBuf * a
+                zt := fTop
+                zb := math.min(fBot, obb)
+            else
+                e := iEntry == "FVG (bord)" ? fBot : iEntry == "FVG 50%" ? (fTop + fBot) / 2 : iEntry == "OB (bord)" ? obb : (obt + obb) / 2
+                sl := ext + iSlBuf * a
+                zb := fBot
+                zt := math.max(fTop, obt)
+            float rk = d == 1 ? e - sl : sl - e
+            bool pdOk = not iPD or (d == 1 ? e <= (ext + legX) / 2 : e >= (ext + legX) / 2)
+            bool side = d == 1 ? e < close : e > close
+            if pdOk and side and rk >= iMinRisk * a and rk <= iMaxRisk * a
+                tp := e + d * rk * iRR
+                okC := true
+                okR := swept and prevT == -d and (not iKzRev or inKz)
+    [okC, okR, e, sl, tp, zt, zb, eo, swept]
+
+// ════════════════════════════════════════════════════════════════════════════
+//  MOTEUR (à la clôture de chaque bougie)
+// ════════════════════════════════════════════════════════════════════════════
+bool armBuy = false
+bool armSell = false
+bool fillBuy = false
+bool fillSell = false
+string alertTxt = ""
+int    alertKind = 0   // 1 = ordre à placer, 2 = ordre rempli
+
+if barstate.isconfirmed and not na(atr)
+    // ── 1) position ouverte ─────────────────────────────────────────────────
+    if qDir != 0 and bar_index > qBar
+        [r, px] = f_manage(qDir, qE, qSl, qTp, qRk, qSt, qBar)
+        if na(r)
+            if iExit == "Stop suiveur ATR"
+                if qDir == 1
+                    qExt := math.max(qExt, high)
+                    qSt := math.max(qSt, qExt - iTrailM * atr)
+                else
+                    qExt := math.min(qExt, low)
+                    qSt := math.min(qSt, qExt + iTrailM * atr)
+                line.set_y1(qSlLn, qSt)
+                line.set_y2(qSlLn, qSt)
+            line.set_x2(qSlLn, bar_index)
+            if not na(qTpLn)
+                line.set_x2(qTpLn, bar_index)
+        else
+            float net = r - qE * iFee / 100 / qRk
+            f_rec(qModel, net)
+            f_exitMark(px, net)
+            line.set_x2(qSlLn, bar_index)
+            if not na(qTpLn)
+                line.set_x2(qTpLn, bar_index)
+            qDir := 0
+
+    // ── 2) ordre limite : remplissage / annulation ──────────────────────────
+    if pDir != 0 and qDir == 0 and bar_index > pBar
+        bool filled = pDir == 1 ? low <= pE : high >= pE
+        if filled
+            float fpx = pDir == 1 ? math.min(pE, open) : math.max(pE, open)
+            float rk = pDir == 1 ? fpx - pSl : pSl - fpx
+            color col = pDir == 1 ? cBull : cBear
+            string tt = (pModel == 0 ? "Continuation" : "Reversal A+") + "\nEntrée " + str.tostring(fpx, format.mintick) + "\nSL " + str.tostring(pSl, format.mintick) + "\nTP " + str.tostring(pTp, format.mintick) + " (" + str.tostring(iRR) + "R)"
+            if pDir == 1
+                label.new(bar_index, low, "BUY", yloc = yloc.belowbar, style = label.style_label_up, color = col, textcolor = color.white, size = size.normal, tooltip = tt)
+                fillBuy := true
+            else
+                label.new(bar_index, high, "SELL", yloc = yloc.abovebar, style = label.style_label_down, color = col, textcolor = color.white, size = size.normal, tooltip = tt)
+                fillSell := true
+            alertKind := 2
+            alertTxt := (pDir == 1 ? "SMC BUY rempli " : "SMC SELL rempli ") + syminfo.ticker + " " + timeframe.period + " @ " + str.tostring(fpx, format.mintick) + " | SL " + str.tostring(pSl, format.mintick) + " | TP " + str.tostring(pTp, format.mintick)
+            box.set_right(pBox, bar_index)
+            if rk <= 0
+                f_rec(pModel, -1.0 - fpx * iFee / 100 / math.max(math.abs(pE - pSl), syminfo.mintick))
+                f_exitMark(fpx, -1.0)
+            else
+                qDir := pDir
+                qE := fpx
+                qSl := pSl
+                qTp := pTp
+                qRk := rk
+                qBar := bar_index
+                qModel := pModel
+                qAtr := pAtr
+                qExt := pDir == 1 ? high : low
+                qSt := iExit == "Stop suiveur ATR" ? (pDir == 1 ? math.max(pSl, qExt - iTrailM * atr) : math.min(pSl, qExt + iTrailM * atr)) : pSl
+                sumRiskAtr += rk / pAtr
+                cntRiskAtr += 1
+                qSlLn := line.new(bar_index, qSt, bar_index, qSt, color = cBear, style = line.style_dashed, width = 1)
+                qTpLn := iExit == "TP fixe" ? line.new(bar_index, qTp, bar_index, qTp, color = cBull, style = line.style_dashed, width = 1) : na
+                // bougie d'entrée : seul le SL compte (prudence)
+                if qDir == 1 ? low <= qSl : high >= qSl
+                    float net = -1.0 - fpx * iFee / 100 / rk
+                    f_rec(qModel, net)
+                    f_exitMark(qSl, net)
+                    qDir := 0
+            pDir := 0
+        else
+            bool ran = pDir == 1 ? high >= pTp : low <= pTp
+            if ran or bar_index - pBar >= iMaxWait
+                box.set_right(pBox, bar_index)
+                box.set_bgcolor(pBox, color.new(cGray, 88))
+                box.set_border_color(pBox, color.new(cGray, 60))
+                label.set_text(pLab, (pDir == 1 ? "BUY" : "SELL") + " LIMIT annulé")
+                label.set_textcolor(pLab, cGray)
+                pDir := 0
+
+    // ── 3) pivots + liquidité EQH / EQL ─────────────────────────────────────
+    if iph
+        float nv = high[iLint]
+        if iShowLiq and not na(phV) and math.abs(nv - phV) <= iEqTol * atr
+            ln = line.new(phB, math.max(nv, phV), bar_index, math.max(nv, phV), color = color.new(cBear, 30), style = line.style_dotted, width = 1)
+            label.new(bar_index, math.max(nv, phV), "EQH", style = label.style_label_left, color = color.new(cBear, 100), textcolor = color.new(cBear, 20), size = size.tiny)
+            array.push(liqs, Liq.new(ln, math.max(nv, phV), 1))
+        phV := nv
+        phB := bar_index - iLint
+        phX := false
+        plBeforePh := plV
+    if ipl
+        float nv = low[iLint]
+        if iShowLiq and not na(plV) and math.abs(nv - plV) <= iEqTol * atr
+            ln = line.new(plB, math.min(nv, plV), bar_index, math.min(nv, plV), color = color.new(cBull, 30), style = line.style_dotted, width = 1)
+            label.new(bar_index, math.min(nv, plV), "EQL", style = label.style_label_left, color = color.new(cBull, 100), textcolor = color.new(cBull, 20), size = size.tiny)
+            array.push(liqs, Liq.new(ln, math.min(nv, plV), -1))
+        plV := nv
+        plB := bar_index - iLint
+        plX := false
+        phBeforePl := phV
+    if sph
+        sphV := high[iLsw]
+        sphB := bar_index - iLsw
+        sphX := false
+        trTop := sphV
+        trTopB := sphB
+    if spl
+        splV := low[iLsw]
+        splB := bar_index - iLsw
+        splX := false
+        trBot := splV
+        trBotB := splB
+    if not na(trTop) and high > trTop
+        trTop := high
+        trTopB := bar_index
+    if not na(trBot) and low < trBot
+        trBot := low
+        trBotB := bar_index
+
+    // sweeps de liquidité EQH / EQL
+    if array.size(liqs) > 0
+        for i = array.size(liqs) - 1 to 0
+            Liq q = array.get(liqs, i)
+            bool hit = q.dir == 1 ? high > q.lvl : low < q.lvl
+            if hit
+                line.set_x2(q.ln, bar_index)
+                if q.dir == 1 ? close < q.lvl : close > q.lvl
+                    label.new(bar_index, q.lvl, "$", style = q.dir == 1 ? label.style_label_down : label.style_label_up, color = color.new(q.dir == 1 ? cBear : cBull, 20), textcolor = color.white, size = size.tiny, tooltip = "Sweep de liquidité")
+                array.remove(liqs, i)
+            else
+                line.set_x2(q.ln, bar_index)
+        while array.size(liqs) > 12
+            array.shift(liqs)
+
+    // ── 4) structure swing ──────────────────────────────────────────────────
+    if not na(sphV) and not sphX and close > sphV
+        if iShowSw
+            f_struct(sphB, sphV, 1, tSw == -1, true)
+        if iShowOB
+            [eoS1, extS1] = f_legExtreme(1, sphB)
+            f_addOB(bar_index - eoS1, high[eoS1], low[eoS1], 1)
+        sphX := true
+        tSw := 1
+    if not na(splV) and not splX and close < splV
+        if iShowSw
+            f_struct(splB, splV, -1, tSw == 1, true)
+        if iShowOB
+            [eoS2, extS2] = f_legExtreme(-1, splB)
+            f_addOB(bar_index - eoS2, high[eoS2], low[eoS2], -1)
+        splX := true
+        tSw := -1
+
+    // ── 5) structure interne + armement des signaux ─────────────────────────
+    int   aDir = 0
+    int   aModel = 0
+    float aE = na
+    float aSl = na
+    float aTp = na
+    float aZt = na
+    float aZb = na
+    int   aEo = 0
+    bool  aSw = false
+    if not na(phV) and not phX and close > phV
+        int prev = tInt
+        phX := true
+        tInt := 1
+        if iShowInt
+            f_struct(phB, phV, 1, prev == -1, false)
+        if iShowOB
+            [eoI1, extI1] = f_legExtreme(1, phB)
+            f_addOB(bar_index - eoI1, high[eoI1], low[eoI1], 1)
+        [okC, okR, e, sl, tp, zt, zb, eo, sw] = f_arm(1, prev, phB, plBeforePh, atr)
+        bool take = iModel == "Continuation (tendance)" ? okC : iModel == "Reversal A+ (ICT 2022)" ? okR : iModel == "Les deux" ? okC or okR : false
+        if take
+            aDir := 1
+            aModel := iModel == "Reversal A+ (ICT 2022)" or (iModel == "Les deux" and okR) ? 1 : 0
+            aE := e
+            aSl := sl
+            aTp := tp
+            aZt := zt
+            aZb := zb
+            aEo := eo
+            aSw := sw
+    if not na(plV) and not plX and close < plV
+        int prev2 = tInt
+        plX := true
+        tInt := -1
+        if iShowInt
+            f_struct(plB, plV, -1, prev2 == 1, false)
+        if iShowOB
+            [eoI2, extI2] = f_legExtreme(-1, plB)
+            f_addOB(bar_index - eoI2, high[eoI2], low[eoI2], -1)
+        [okC2, okR2, e2, sl2, tp2, zt2, zb2, eo2, sw2] = f_arm(-1, prev2, plB, phBeforePl, atr)
+        bool take2 = iModel == "Continuation (tendance)" ? okC2 : iModel == "Reversal A+ (ICT 2022)" ? okR2 : iModel == "Les deux" ? okC2 or okR2 : false
+        if take2
+            aDir := -1
+            aModel := iModel == "Reversal A+ (ICT 2022)" or (iModel == "Les deux" and okR2) ? 1 : 0
+            aE := e2
+            aSl := sl2
+            aTp := tp2
+            aZt := zt2
+            aZb := zb2
+            aEo := eo2
+            aSw := sw2
+
+    if aDir != 0 and qDir == 0
+        // un nouvel armement remplace l'ordre non rempli
+        if pDir != 0
+            box.set_right(pBox, bar_index)
+            box.set_bgcolor(pBox, color.new(cGray, 88))
+            box.set_border_color(pBox, color.new(cGray, 60))
+            label.set_text(pLab, (pDir == 1 ? "BUY" : "SELL") + " LIMIT remplacé")
+            label.set_textcolor(pLab, cGray)
+        color col = aDir == 1 ? cBull : cBear
+        pDir := aDir
+        pE := aE
+        pSl := aSl
+        pTp := aTp
+        pAtr := atr
+        pBar := bar_index
+        pModel := aModel
+        pBox := box.new(bar_index - aEo, aZt, bar_index + iMaxWait, aZb, border_color = color.new(col, 10), border_width = 2, bgcolor = color.new(col, 70))
+        string mtxt = (aDir == 1 ? "BUY" : "SELL") + " LIMIT " + str.tostring(aE, format.mintick) + (aModel == 1 ? " · A+" : "")
+        pLab := label.new(bar_index + 1, aE, mtxt, style = label.style_label_left, color = color.new(col, 100), textcolor = col, size = size.small, tooltip = "SL " + str.tostring(aSl, format.mintick) + "\nTP " + str.tostring(aTp, format.mintick) + "\nValable " + str.tostring(iMaxWait) + " bougies")
+        if aModel == 1 and aSw
+            label.new(bar_index - aEo, aDir == 1 ? low[aEo] : high[aEo], "$", style = aDir == 1 ? label.style_label_up : label.style_label_down, color = color.new(col, 20), textcolor = color.white, size = size.tiny, tooltip = "Liquidité balayée")
+        armBuy := aDir == 1
+        armSell := aDir == -1
+        float riskCash = iCapital * iRiskPct / 100
+        float qty = riskCash / math.abs(aE - aSl)
+        alertKind := 1
+        alertTxt := (aDir == 1 ? "SMC BUY LIMIT " : "SMC SELL LIMIT ") + syminfo.ticker + " " + timeframe.period + " @ " + str.tostring(aE, format.mintick) + " | SL " + str.tostring(aSl, format.mintick) + " | TP " + str.tostring(aTp, format.mintick) + " | taille ≈ " + str.tostring(qty, "#.####") + " (risque " + str.tostring(riskCash, "#") + ") | valable " + str.tostring(iMaxWait) + " bougies"
+
+    // ── 6) mise à jour des OB / breakers ────────────────────────────────────
+    if array.size(obs) > 0
+        for i = array.size(obs) - 1 to 0
+            Zone z = array.get(obs, i)
+            bool kill = false
+            if not z.flipped
+                if z.dir == 1 ? close < z.bot : close > z.top
+                    if iShowBrk
+                        z.flipped := true
+                        z.dir := -z.dir
+                        color nc = z.dir == 1 ? cBull : cBear
+                        box.set_border_style(z.bx, line.style_dashed)
+                        box.set_border_color(z.bx, color.new(nc, 40))
+                        box.set_bgcolor(z.bx, color.new(nc, 90))
+                        box.set_text(z.bx, "Breaker")
+                        box.set_text_color(z.bx, color.new(nc, 20))
+                    else
+                        kill := true
+            else
+                if z.dir == 1 ? close < z.bot : close > z.top
+                    kill := true
+            if kill
+                box.delete(z.bx)
+                array.remove(obs, i)
+            else
+                box.set_right(z.bx, bar_index + 5)
+
+    // ── 7) FVG / iFVG ───────────────────────────────────────────────────────
+    if array.size(fvgs) > 0
+        for i = array.size(fvgs) - 1 to 0
+            Zone z = array.get(fvgs, i)
+            bool kill = false
+            if not z.flipped
+                if z.dir == 1
+                    if low <= z.bot
+                        if close < z.bot and iShowIFVG
+                            z.flipped := true
+                            z.dir := -1
+                        else
+                            kill := true
+                    else if low < z.top
+                        z.top := low
+                        box.set_top(z.bx, low)
+                else
+                    if high >= z.top
+                        if close > z.top and iShowIFVG
+                            z.flipped := true
+                            z.dir := 1
+                        else
+                            kill := true
+                    else if high > z.bot
+                        z.bot := high
+                        box.set_bottom(z.bx, high)
+                if z.flipped
+                    color nc = z.dir == 1 ? cBull : cBear
+                    box.set_border_style(z.bx, line.style_dotted)
+                    box.set_border_color(z.bx, color.new(nc, 30))
+                    box.set_bgcolor(z.bx, color.new(nc, 92))
+                    box.set_text(z.bx, "iFVG")
+            else
+                if z.dir == 1 ? close < z.bot : close > z.top
+                    kill := true
+            if kill
+                box.delete(z.bx)
+                array.remove(fvgs, i)
+            else
+                box.set_right(z.bx, bar_index + 5)
+    if iShowFVG
+        if low > high[2] and low - high[2] >= iFvgMin * atr
+            bx = box.new(bar_index - 2, low, bar_index + 5, high[2], border_color = color.new(cBull, 70), bgcolor = color.new(cBull, 85), text = "FVG", text_size = size.tiny, text_color = color.new(cBull, 30), text_halign = text.align_right)
+            array.push(fvgs, Zone.new(bx, low, high[2], 1, false))
+            f_trimZones(fvgs, 1, iFvgN)
+        if high < low[2] and low[2] - high >= iFvgMin * atr
+            bx = box.new(bar_index - 2, low[2], bar_index + 5, high, border_color = color.new(cBear, 70), bgcolor = color.new(cBear, 85), text = "FVG", text_size = size.tiny, text_color = color.new(cBear, 30), text_halign = text.align_right)
+            array.push(fvgs, Zone.new(bx, low[2], high, -1, false))
+            f_trimZones(fvgs, -1, iFvgN)
+
+    // ── 8) placebo : entrées au hasard (mêmes filtres de biais, même risque) ─
+    if array.size(zE) > 0
+        for i = array.size(zE) - 1 to 0
+            if bar_index > array.get(zB, i)
+                [r, px] = f_manage(array.get(zD, i), array.get(zE, i), array.get(zSl, i), array.get(zTp, i), array.get(zRk, i), array.get(zSt, i), array.get(zB, i))
+                if na(r)
+                    if iExit == "Stop suiveur ATR"
+                        int d = array.get(zD, i)
+                        float ex = d == 1 ? math.max(array.get(zEx, i), high) : math.min(array.get(zEx, i), low)
+                        array.set(zEx, i, ex)
+                        array.set(zSt, i, d == 1 ? math.max(array.get(zSt, i), ex - iTrailM * atr) : math.min(array.get(zSt, i), ex + iTrailM * atr))
+                else
+                    f_recPl(r - array.get(zE, i) * iFee / 100 / array.get(zRk, i))
+                    array.remove(zE, i)
+                    array.remove(zSl, i)
+                    array.remove(zTp, i)
+                    array.remove(zRk, i)
+                    array.remove(zSt, i)
+                    array.remove(zEx, i)
+                    array.remove(zD, i)
+                    array.remove(zB, i)
+    if bar_index % iPlStep == 0 and bar_index > 250 and array.size(zE) < 300
+        int d = 0
+        if (not iUseSwing or tSw == 1) and (not htfOn or htfBias == 1) and (iUseSwing or htfOn)
+            d := 1
+        else if (not iUseSwing or tSw == -1) and (not htfOn or htfBias == -1) and (iUseSwing or htfOn)
+            d := -1
+        else if not iUseSwing and not htfOn
+            d := int(math.floor(bar_index / iPlStep)) % 2 == 0 ? 1 : -1
+        if d != 0
+            float ra = cntRiskAtr > 0 ? sumRiskAtr / cntRiskAtr : 1.5
+            float rk = ra * atr
+            array.push(zE, close)
+            array.push(zSl, close - d * rk)
+            array.push(zTp, close + d * rk * iRR)
+            array.push(zRk, rk)
+            array.push(zSt, close - d * rk)
+            array.push(zEx, close)
+            array.push(zD, d)
+            array.push(zB, bar_index)
+
+    if alertTxt != "" and notifOk and (alertKind == 1 or iNotifFill)
+        bool   isBuy = alertKind == 1 ? armBuy : fillBuy
+        string ttl   = (alertKind == 1 ? (isBuy ? "🟢 BUY LIMIT " : "🔴 SELL LIMIT ") : (isBuy ? "✅ BUY rempli " : "✅ SELL rempli ")) + syminfo.ticker + " " + timeframe.period
+        string msg   = iNtfy ? "{\"topic\":\"" + iTopic + "\",\"title\":\"" + ttl + "\",\"message\":\"" + alertTxt + "\",\"priority\":" + (alertKind == 1 ? "5" : "3") + ",\"tags\":[\"chart_with_upwards_trend\"]}" : alertTxt
+        alert(msg, alert.freq_once_per_bar_close)
+
+// ─── PREMIUM / DISCOUNT ─────────────────────────────────────────────────────
+var box   bxPrem = na
+var box   bxDisc = na
+var line  lnEq   = na
+var label lbPrem = na
+var label lbDisc = na
+if iShowPD and barstate.islast and not na(trTop) and not na(trBot) and trTop > trBot
+    float eq = (trTop + trBot) / 2
+    int   lft = math.min(trTopB, trBotB)
+    box.delete(bxPrem)
+    box.delete(bxDisc)
+    line.delete(lnEq)
+    label.delete(lbPrem)
+    label.delete(lbDisc)
+    bxPrem := box.new(lft, trTop, bar_index + 20, eq, border_color = color.new(cBear, 100), bgcolor = color.new(cBear, 94))
+    bxDisc := box.new(lft, eq, bar_index + 20, trBot, border_color = color.new(cBull, 100), bgcolor = color.new(cBull, 94))
+    lnEq := line.new(lft, eq, bar_index + 20, eq, color = color.new(cGray, 30), style = line.style_dashed)
+    lbPrem := label.new(bar_index + 20, trTop, "Premium", style = label.style_label_left, color = color.new(cBear, 100), textcolor = color.new(cBear, 20), size = size.tiny)
+    lbDisc := label.new(bar_index + 20, trBot, "Discount", style = label.style_label_left, color = color.new(cBull, 100), textcolor = color.new(cBull, 20), size = size.tiny)
+
+// ─── TABLEAU ────────────────────────────────────────────────────────────────
+var table tbl = table.new(iTblPos == "Haut droite" ? position.top_right : iTblPos == "Bas gauche" ? position.bottom_left : position.bottom_right, 6, 11, bgcolor = color.new(#0B0E14, 8), frame_color = color.new(cGray, 50), frame_width = 1, border_color = color.new(cGray, 82), border_width = 1)
+
+f_cell(int c, int r, string t, color tc, string sz) =>
+    table.cell(tbl, c, r, t, text_color = tc, text_size = sz, text_halign = c == 0 ? text.align_left : text.align_right)
+
+f_row(int r, int s, string name, color tc) =>
+    int n = array.get(sN, s)
+    f_cell(0, r, name, tc, size.small)
+    f_cell(1, r, str.tostring(n), tc, size.small)
+    f_cell(2, r, n > 0 ? str.tostring(100.0 * array.get(sW, s) / n, "#") + "%" : "-", tc, size.small)
+    f_cell(3, r, n > 0 ? str.tostring(f_pf(s), "#.##") : "-", tc, size.small)
+    f_cell(4, r, n > 0 ? f_sgn(f_avg(s), "#.##") : "-", tc, size.small)
+    f_cell(5, r, n > 0 ? f_sgn(array.get(sWin, s) - array.get(sLoss, s), "#.#") : "-", tc, size.small)
+
+if iShowTable and barstate.isfirst
+    for r = 0 to 10
+        for c = 0 to 5
+            table.cell(tbl, c, r, "")
+    table.merge_cells(tbl, 0, 0, 5, 0)
+    for r = 6 to 10
+        table.merge_cells(tbl, 0, r, 5, r)
+
+if iShowTable and barstate.islast
+    f_cell(0, 0, "SMC PRO v2 · backtest live (walk-forward, frais inclus)", color.white, size.small)
+    f_cell(0, 1, "", cGray, size.tiny)
+    f_cell(1, 1, "Trades", cGray, size.tiny)
+    f_cell(2, 1, "Win %", cGray, size.tiny)
+    f_cell(3, 1, "PF", cGray, size.tiny)
+    f_cell(4, 1, "Moy. R", cGray, size.tiny)
+    f_cell(5, 1, "Total R", cGray, size.tiny)
+    f_row(2, 0, "Continuation", color.new(color.white, 20))
+    f_row(3, 1, "Reversal A+", color.new(color.white, 20))
+    float avgT = f_avg(2)
+    float avgP = f_avg(3)
+    int   nT   = array.get(sN, 2)
+    f_row(4, 2, "SIGNAUX (total)", avgT > 0 ? cBull : nT > 0 ? cBear : cGray)
+    f_row(5, 3, "Placebo (hasard)", cGray)
+    string verdict = nT < 30 ? "⏳ " + str.tostring(nT) + " trades : pas assez pour conclure (il en faut 30+). Charge plus d'historique." : avgT > avgP + 0.10 and f_pf(2) >= 1.2 ? "✅ Les signaux battent le hasard ici : " + f_sgn(avgT - avgP, "#.##") + " R / trade" : avgT > 0 ? "⚠ Rentable mais PAS mieux que le hasard → le gain vient de la tendance, pas du setup" : "❌ Pas d'edge sur cet actif / ce timeframe → ne trade pas ces signaux ici"
+    color vc = nT < 30 ? color.orange : avgT > avgP + 0.10 and f_pf(2) >= 1.2 ? cBull : avgT > 0 ? color.orange : cBear
+    f_cell(0, 6, verdict, vc, size.small)
+    float totR = array.get(sWin, 2) - array.get(sLoss, 2)
+    f_cell(0, 7, "Résultat des signaux : " + f_sgn(totR, "#.#") + " R ≈ " + f_sgn(totR * iCapital * iRiskPct / 100, "#") + " (risque " + str.tostring(iRiskPct) + " % de " + str.tostring(iCapital, "#") + ")", totR >= 0 ? cBull : cBear, size.small)
+    string bTxt = "Biais HTF " + iHtfTf + " : " + (not htfOn ? "off" : htfBias == 1 ? "▲ haussier" : htfBias == -1 ? "▼ baissier" : "neutre") + "  ·  Swing : " + (tSw == 1 ? "▲" : tSw == -1 ? "▼" : "-") + "  ·  Interne : " + (tInt == 1 ? "▲" : tInt == -1 ? "▼" : "-")
+    f_cell(0, 8, bTxt, color.white, size.tiny)
+    string oTxt = pDir != 0 ? "Ordre actif : " + (pDir == 1 ? "BUY" : "SELL") + " LIMIT " + str.tostring(pE, format.mintick) + " · SL " + str.tostring(pSl, format.mintick) + " · TP " + str.tostring(pTp, format.mintick) + " · taille ≈ " + str.tostring(iCapital * iRiskPct / 100 / math.abs(pE - pSl), "#.####") : qDir != 0 ? "Position : " + (qDir == 1 ? "LONG" : "SHORT") + " depuis " + str.tostring(qE, format.mintick) + " · SL " + str.tostring(qSt, format.mintick) + (iExit == "TP fixe" ? " · TP " + str.tostring(qTp, format.mintick) : "") : "Aucun ordre actif"
+    f_cell(0, 9, oTxt, pDir == 1 or qDir == 1 ? cBull : pDir == -1 or qDir == -1 ? cBear : cGray, size.tiny)
+    string tfWarn = timeframe.in_seconds() < 3600 ? "⚠ < 1h : les frais mangent 20-30 % du risque → préfère 1h / 4h · " : ""
+    f_cell(0, 10, tfWarn + "Entrée " + iEntry + " · SL extrême + " + str.tostring(iSlBuf) + " ATR · " + (iExit == "TP fixe" ? "TP " + str.tostring(iRR) + "R" : "stop suiveur " + str.tostring(iTrailM) + " ATR") + " · frais " + str.tostring(iFee) + " % · résultats passés ≠ futurs", tfWarn != "" ? color.orange : cGray, size.tiny)
+
+// ─── CONSIGNE « QUOI FAIRE » ────────────────────────────────────────────────
+var label actLb = na
+if iShowAct and barstate.islast
+    label.delete(actLb)
+    int bd = 0
+    if (iUseSwing or htfOn) and (not iUseSwing or tSw == 1) and (not htfOn or htfBias == 1)
+        bd := 1
+    else if (iUseSwing or htfOn) and (not iUseSwing or tSw == -1) and (not htfOn or htfBias == -1)
+        bd := -1
+    int   nA = array.get(sN, 2)
+    bool  noEdge = nA >= 30 and f_avg(2) <= 0
+    float rc = iCapital * iRiskPct / 100
+    string act = ""
+    color  ac = cGray
+    if iModel == "Aucun"
+        act := "Signaux désactivés (Modèle = Aucun)"
+    else if qDir != 0
+        act := "▶ EN POSITION " + (qDir == 1 ? "LONG" : "SHORT") + "\nSL " + str.tostring(qSt, format.mintick) + (iExit == "TP fixe" ? " · TP " + str.tostring(qTp, format.mintick) : "") + "\nNe touche à rien, laisse SL / TP faire"
+        ac := qDir == 1 ? cBull : cBear
+    else if pDir != 0
+        act := "▶ PLACE UN " + (pDir == 1 ? "BUY" : "SELL") + " LIMIT à " + str.tostring(pE, format.mintick) + "\nSL " + str.tostring(pSl, format.mintick) + " · TP " + str.tostring(pTp, format.mintick) + "\nTaille ≈ " + str.tostring(rc / math.abs(pE - pSl), "#.####") + " (risque " + str.tostring(rc, "#") + ") · annule après " + str.tostring(math.max(iMaxWait - (bar_index - pBar), 0)) + " bougies"
+        ac := pDir == 1 ? cBull : cBear
+    else if bd == 0
+        act := "⏸ RIEN À FAIRE\nBiais contradictoires (HTF " + (htfBias == 1 ? "▲" : htfBias == -1 ? "▼" : "-") + " / swing " + (tSw == 1 ? "▲" : tSw == -1 ? "▼" : "-") + ")\nOn attend qu'ils soient d'accord"
+    else
+        act := "⏸ ATTENDRE un " + (bd == 1 ? "BUY" : "SELL") + "\nBiais " + (bd == 1 ? "▲ haussier" : "▼ baissier") + " : il faut une cassure " + (bd == 1 ? "haussière" : "baissière") + "\nqui laisse un FVG → l'ordre s'affichera ici"
+        ac := color.new(bd == 1 ? cBull : cBear, 40)
+    if noEdge and qDir == 0
+        act += "\n⚠ Pas d'edge prouvé sur cet actif / TF"
+    act += notifOk ? (iNtfy ? "\n🔔 ntfy : " + iTopic : "") : "\n🔕 Notifs off (ni forex ni métal)"
+    actLb := label.new(bar_index + 3, close, act, style = label.style_label_left, color = color.new(ac, 15), textcolor = color.white, size = size.normal, textalign = text.align_left)
+
+// ─── ALERTES ────────────────────────────────────────────────────────────────
+alertcondition(notifOk and armBuy, "SMC BUY LIMIT", "SMC BUY LIMIT {{ticker}} {{interval}}")
+alertcondition(notifOk and armSell, "SMC SELL LIMIT", "SMC SELL LIMIT {{ticker}} {{interval}}")
+alertcondition(fillBuy, "SMC BUY rempli", "SMC BUY rempli {{ticker}} {{interval}} @ {{close}}")
+alertcondition(fillSell, "SMC SELL rempli", "SMC SELL rempli {{ticker}} {{interval}} @ {{close}}")

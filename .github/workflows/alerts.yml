@@ -3,8 +3,9 @@ name: Confluence alerts
 # Boucle quasi continue : chaque run scanne ~20 s après chaque clôture 15m pendant 5h45,
 # le cron horaire en garde toujours un en attente pour enchaîner (repo public = minutes illimitées).
 on:
-  schedule:
-    - cron: "7 * * * 0-5"   # dim soir -> ven (marchés fermés le samedi)
+  # Désactivé : remplacé par SMC Pro (smc.yml). Remets ces 2 lignes pour le réactiver.
+  # schedule:
+  #   - cron: "7 * * * 0-5"
   workflow_dispatch:
     inputs:
       test:
