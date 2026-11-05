@@ -1,0 +1,193 @@
+<title>FVG pas à pas</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout : un « écran de trading » central animé, légende pas à pas dessous, contrôles type lecteur */
+:root{
+  --bg:#EEF1F5; --screen:#FFFFFF; --ink:#13202B; --muted:#5B6A79; --rule:#DDE3EA;
+  --up:#0E8F6E; --down:#CF3F55; --gap:rgba(43,87,217,.16); --gap-line:#2B57D9; --inv:rgba(207,63,85,.14);
+  --entry:#C98A06; --ok:#0E8F6E; --bad:#CF3F55;
+  --f-display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --f-body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0D1218; --screen:#141C25; --ink:#E5ECF2; --muted:#93A1B0; --rule:#243140;
+  --up:#2BC59A; --down:#F0657A; --gap:rgba(124,156,255,.18); --gap-line:#7C9CFF; --inv:rgba(240,101,122,.16);
+  --entry:#F0B43C; --ok:#2BC59A; --bad:#F0657A; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D1218; --screen:#141C25; --ink:#E5ECF2; --muted:#93A1B0; --rule:#243140;
+  --up:#2BC59A; --down:#F0657A; --gap:rgba(124,156,255,.18); --gap-line:#7C9CFF; --inv:rgba(240,101,122,.16);
+  --entry:#F0B43C; --ok:#2BC59A; --bad:#F0657A; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.55 var(--f-body);
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:28px 56px}
+.wrap{max-width:980px;margin:0 auto;display:grid;gap:24px}
+header{display:grid;gap:10px;max-width:70ch}
+.eyebrow{font:600 12px/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--gap-line)}
+h1{font:800 clamp(32px,6vw,52px)/1.03 var(--f-display);margin:0;text-wrap:balance}
+h2{font:800 clamp(22px,3vw,28px)/1.1 var(--f-display);margin:0;text-wrap:balance}
+p{margin:0}.lede{color:var(--muted);font-size:18px}
+.tabs{display:flex;flex-wrap:wrap;gap:8px}
+.tabs button{font:600 14px/1 var(--f-body);padding:10px 14px;border-radius:99px;border:1px solid var(--rule);background:var(--screen);color:var(--ink);cursor:pointer}
+.tabs button[aria-pressed="true"]{border-color:var(--gap-line);color:var(--gap-line)}
+.stage{background:var(--screen);border:1px solid var(--rule);border-radius:12px;padding:14px;display:grid;gap:12px}
+.stage-top{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;font:400 13px/1.3 var(--f-mono);color:var(--muted)}
+svg{width:100%;height:auto;display:block}
+svg text{font-family:var(--f-mono)}
+.caption{display:grid;gap:6px;min-height:118px;border-top:1px solid var(--rule);padding-top:12px}
+.caption .step{font:600 12px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.caption h3{font:600 20px/1.25 var(--f-display);margin:0}
+.caption p{max-width:70ch}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-weight:600}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.controls button{font:600 14px/1 var(--f-body);padding:10px 14px;border-radius:8px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer;min-width:44px}
+.controls button.primary{background:var(--gap-line);border-color:var(--gap-line);color:var(--screen)}
+button:focus-visible{outline:2px solid var(--gap-line);outline-offset:2px}
+.dots{display:flex;gap:6px;flex-wrap:wrap}
+.dots span{width:10px;height:10px;border-radius:50%;background:var(--rule)}
+.dots span.on{background:var(--gap-line)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:12px}
+.fact{background:var(--screen);border:1px solid var(--rule);border-radius:10px;padding:14px;display:grid;gap:4px}
+.fact .big{font:600 26px/1 var(--f-mono);font-variant-numeric:tabular-nums}
+.fact .lab{font-size:14px;color:var(--muted)}
+.rules{background:var(--screen);border:1px solid var(--rule);border-radius:12px;padding:18px;display:grid;gap:10px}
+.rules ol{margin:0;padding-left:20px;display:grid;gap:6px}
+footer{color:var(--muted);font-size:14px}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Smart Money · vraies bougies de l'or</div>
+    <h1>Le FVG, pas à pas</h1>
+    <p class="lede">Un Fair Value Gap, c'est un « trou » laissé par une bougie trop rapide. L'animation rejoue deux vrais FVG sur XAUUSD en H4 : un qui marche, un qui casse.</p>
+  </header>
+
+  <div class="tabs" role="group" aria-label="Choisir l'exemple">
+    <button id="tab-win" aria-pressed="true">Exemple 1 · le FVG tient</button>
+    <button id="tab-fail" aria-pressed="false">Exemple 2 · le FVG casse (iFVG)</button>
+  </div>
+
+  <div class="stage">
+    <div class="stage-top"><span id="meta"></span><span id="price"></span></div>
+    <svg id="chart" viewBox="0 0 760 360" role="img" aria-label="Graphique animé du FVG"></svg>
+    <div class="caption" aria-live="polite"><span class="step" id="stepn"></span><h3 id="title"></h3><p id="text"></p></div>
+    <div class="controls">
+      <button id="prev" aria-label="Étape précédente">◀</button>
+      <button id="play" class="primary">▶ Lecture</button>
+      <button id="next" aria-label="Étape suivante">▶</button>
+      <button id="restart">Recommencer</button>
+      <div class="dots" id="dots" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <section class="rules">
+    <h2>La règle en 5 lignes</h2>
+    <ol>
+      <li><strong>3 bougies</strong> : le bas de la 3e est au-dessus du haut de la 1re (FVG haussier). L'espace entre les deux, c'est le FVG.</li>
+      <li><strong>La bougie du milieu doit être grosse</strong> : c'est l'impulsion. Un FVG minuscule ne compte pas (minimum ≈ 0,5 ATR).</li>
+      <li><strong>Entrée</strong> : ordre limite au <em>haut</em> du FVG quand le prix revient. Le milieu (CE, 50 %) sert de repère.</li>
+      <li><strong>Stop</strong> sous le bas de la bougie 1. <strong>Objectif</strong> : 2 fois le risque.</li>
+      <li><strong>Invalidation</strong> : une clôture sous le bas du FVG le transforme en <em>iFVG</em>, une résistance.</li>
+    </ol>
+  </section>
+
+  <section class="facts" id="facts"></section>
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const D = {"stats": {"n": 3754, "win": 33.2, "ce_n": 1430, "ce_win": 25.0, "top_n": 2324, "top_win": 38.3}, "win": {"sym": "XAUUSD", "date": "2020-07-27 08:00", "dec": 2, "g": 14, "k": 20, "m": 52, "res": "TP", "inv": null, "top": 1930.88, "bot": 1918.49, "ce": 1924.68, "sl": 1902.54, "tp": 1987.56, "ohlc": [[1873.97, 1876.4, 1867.5, 1872.82], [1872.82, 1872.82, 1863.64, 1868.36], [1868.37, 1888.57, 1867.82, 1882.31], [1882.32, 1884.31, 1871.78, 1871.96], [1871.96, 1898.36, 1869.72, 1893.58], [1893.58, 1894.75, 1879.02, 1885.97], [1889.65, 1890.49, 1881.29, 1887.04], [1887.08, 1890.22, 1883.42, 1886.45], [1886.39, 1897.88, 1882.41, 1895.39], [1895.39, 1897.21, 1887.18, 1896.81], [1896.8, 1906.5, 1894.91, 1900.47], [1900.47, 1902.69, 1899.49, 1901.63], [1902.64, 1918.49, 1902.54, 1915.19], [1915.17, 1944.54, 1913.34, 1931.82], [1931.82, 1943.06, 1930.88, 1940.18], [1940.17, 1945.15, 1931.28, 1931.83], [1931.87, 1945.62, 1930.93, 1935.0], [1935.0, 1942.4, 1933.44, 1940.96], [1943.28, 1967.18, 1941.74, 1963.84], [1963.9, 1981.16, 1933.08, 1944.35], [1944.4, 1945.74, 1906.63, 1931.14], [1931.22, 1939.62, 1922.66, 1939.21], [1939.14, 1956.54, 1930.98, 1946.77], [1946.65, 1961.02, 1946.53, 1957.98], [1962.16, 1964.01, 1949.18, 1957.08], [1957.08, 1961.84, 1947.75, 1951.96], [1951.96, 1961.14, 1949.67, 1959.06], [1959.06, 1959.98, 1952.64, 1959.92], [1959.92, 1961.8, 1941.33, 1960.28], [1960.31, 1980.75, 1951.44, 1970.82], [1971.04, 1971.32, 1964.55, 1966.51], [1966.46, 1970.7, 1959.05, 1962.2], [1962.14, 1962.34, 1947.14, 1952.91], [1952.88, 1956.58, 1944.89, 1953.31], [1953.47, 1961.88, 1939.44, 1949.56], [1949.5, 1957.74, 1948.9, 1957.54], [1955.5, 1961.55, 1955.33, 1958.45], [1958.35, 1971.47, 1958.11, 1967.15], [1967.15, 1983.97, 1966.86, 1976.8], [1976.8, 1978.3, 1970.36, 1973.29], [1973.29, 1977.17, 1959.79, 1973.12], [1973.12, 1975.36, 1966.62, 1975.02], [1983.53, 1984.9, 1972.44, 1976.14], [1976.2, 1977.0, 1969.67, 1973.58], [1973.58, 1977.47, 1970.08, 1973.26], [1973.3, 1974.43, 1965.68, 1967.72], [1967.63, 1976.52, 1960.39, 1970.65], [1970.67, 1977.6, 1970.3, 1975.98], [1977.36, 1977.56, 1971.53, 1972.87], [1972.74, 1978.57, 1971.37, 1974.64], [1974.6, 1978.81, 1971.41, 1976.47], [1976.49, 1977.73, 1966.66, 1972.27], [1972.27, 2000.31, 1971.31, 1999.57], [1999.57, 2019.82, 1998.57, 2018.53], [2021.19, 2030.95, 2012.79, 2020.54], [2020.54, 2022.74, 2009.39, 2022.65], [2022.79, 2039.82, 2021.21, 2037.6], [2037.6, 2044.65, 2030.24, 2035.12]], "t": ["2020-07-23 00:00", "2020-07-23 04:00", "2020-07-23 08:00", "2020-07-23 12:00", "2020-07-23 16:00", "2020-07-23 20:00", "2020-07-24 00:00", "2020-07-24 04:00", "2020-07-24 08:00", "2020-07-24 12:00", "2020-07-24 16:00", "2020-07-24 20:00", "2020-07-27 00:00", "2020-07-27 04:00", "2020-07-27 08:00", "2020-07-27 12:00", "2020-07-27 16:00", "2020-07-27 20:00", "2020-07-28 00:00", "2020-07-28 04:00", "2020-07-28 08:00", "2020-07-28 12:00", "2020-07-28 16:00", "2020-07-28 20:00", "2020-07-29 00:00", "2020-07-29 04:00", "2020-07-29 08:00", "2020-07-29 12:00", "2020-07-29 16:00", "2020-07-29 20:00", "2020-07-30 00:00", "2020-07-30 04:00", "2020-07-30 08:00", "2020-07-30 12:00", "2020-07-30 16:00", "2020-07-30 20:00", "2020-07-31 00:00", "2020-07-31 04:00", "2020-07-31 08:00", "2020-07-31 12:00", "2020-07-31 16:00", "2020-07-31 20:00", "2020-08-03 00:00", "2020-08-03 04:00", "2020-08-03 08:00", "2020-08-03 12:00", "2020-08-03 16:00", "2020-08-03 20:00", "2020-08-04 00:00", "2020-08-04 04:00", "2020-08-04 08:00", "2020-08-04 12:00", "2020-08-04 16:00", "2020-08-04 20:00", "2020-08-05 00:00", "2020-08-05 04:00", "2020-08-05 08:00", "2020-08-05 12:00"]}, "fail": {"sym": "XAUUSD", "date": "2020-12-07 20:00", "dec": 2, "g": 14, "k": 22, "m": 26, "res": "SL", "inv": 26, "top": 1857.99, "bot": 1840.17, "ce": 1849.08, "sl": 1827.49, "tp": 1918.99, "ohlc": [[1837.84, 1843.91, 1834.77, 1836.25], [1836.35, 1843.31, 1823.64, 1837.93], [1837.93, 1842.32, 1835.33, 1840.98], [1841.28, 1842.69, 1838.02, 1839.4], [1839.45, 1844.76, 1838.02, 1838.55], [1838.56, 1844.2, 1837.85, 1842.2], [1842.2, 1847.55, 1833.07, 1837.63], [1837.71, 1848.17, 1829.11, 1834.18], [1834.18, 1839.13, 1833.72, 1838.6], [1836.86, 1839.32, 1833.07, 1837.7], [1837.66, 1842.22, 1836.11, 1842.04], [1842.04, 1842.41, 1821.99, 1831.75], [1831.75, 1840.17, 1827.49, 1839.3], [1839.3, 1868.5, 1837.92, 1865.45], [1865.46, 1865.59, 1857.99, 1863.1], [1862.91, 1866.35, 1860.95, 1863.83], [1863.86, 1871.87, 1863.52, 1867.38], [1867.38, 1869.71, 1861.25, 1864.54], [1864.49, 1872.54, 1860.17, 1864.69], [1864.69, 1875.28, 1862.04, 1872.78], [1872.78, 1873.26, 1869.13, 1870.83], [1869.35, 1870.53, 1865.32, 1867.27], [1867.27, 1868.44, 1855.65, 1859.14], [1859.06, 1866.12, 1857.99, 1860.85], [1860.87, 1864.12, 1851.48, 1859.1], [1859.1, 1859.25, 1837.39, 1841.89], [1841.89, 1841.99, 1825.4, 1839.41], [1838.49, 1839.97, 1833.67, 1839.59], [1839.59, 1842.42, 1838.03, 1839.37], [1839.37, 1840.11, 1828.62, 1831.96], [1831.96, 1846.76, 1830.83, 1845.4], [1845.42, 1849.98, 1830.51, 1830.69], [1830.69, 1836.85, 1830.21, 1835.96], [1837.03, 1840.26, 1835.37, 1840.15], [1840.15, 1840.68, 1834.2, 1834.75], [1834.74, 1837.67, 1831.41, 1837.0], [1836.95, 1840.9, 1823.91, 1839.93], [1839.79, 1847.66, 1834.86, 1841.99], [1841.99, 1842.62, 1837.85, 1839.91], [1837.07, 1838.15, 1834.25, 1835.32]], "t": ["2020-12-03 12:00", "2020-12-03 16:00", "2020-12-03 20:00", "2020-12-04 00:00", "2020-12-04 04:00", "2020-12-04 08:00", "2020-12-04 12:00", "2020-12-04 16:00", "2020-12-04 20:00", "2020-12-07 00:00", "2020-12-07 04:00", "2020-12-07 08:00", "2020-12-07 12:00", "2020-12-07 16:00", "2020-12-07 20:00", "2020-12-08 00:00", "2020-12-08 04:00", "2020-12-08 08:00", "2020-12-08 12:00", "2020-12-08 16:00", "2020-12-08 20:00", "2020-12-09 00:00", "2020-12-09 04:00", "2020-12-09 08:00", "2020-12-09 12:00", "2020-12-09 16:00", "2020-12-09 20:00", "2020-12-10 00:00", "2020-12-10 04:00", "2020-12-10 08:00", "2020-12-10 12:00", "2020-12-10 16:00", "2020-12-10 20:00", "2020-12-11 00:00", "2020-12-11 04:00", "2020-12-11 08:00", "2020-12-11 12:00", "2020-12-11 16:00", "2020-12-11 20:00", "2020-12-14 00:00"]}};
+const $ = id => document.getElementById(id);
+let ex = "win", step = 0, playing = false, timer = null, shown = 0, anim = null;
+const fmt = (v, d) => v.toFixed(d);
+function steps(e, kind) {
+  const d = e.dec, risk = e.top - e.sl, size = e.top - e.bot, u = e.sym === "XAUUSD" ? " $" : "";
+  const s = [
+    { upto: e.g - 3, title: "Le marché avant", text: `XAUUSD en H4, le ${e.date.slice(8,10)}/${e.date.slice(5,7)}/${e.date.slice(0,4)}. Le prix hésite. Aucun FVG pour l'instant.` },
+    { upto: e.g - 2, mark1: true, title: "Bougie 1", text: `On retient son <strong>plus haut</strong> : <span class="num">${fmt(e.bot, d)}</span>. Ce sera le bas du futur FVG.` },
+    { upto: e.g - 1, mark1: true, title: "Bougie 2 : l'impulsion", text: `Une grosse bougie verte part d'un coup. Les acheteurs poussent si vite que certains prix ne sont presque pas échangés.` },
+    { upto: e.g, mark1: true, mark3: true, title: "Bougie 3", text: `On retient son <strong>plus bas</strong> : <span class="num">${fmt(e.top, d)}</span>. Il est au-dessus du haut de la bougie 1.` },
+    { upto: e.g, gap: true, title: "Le FVG apparaît", text: `Entre <span class="num">${fmt(e.bot, d)}</span> et <span class="num">${fmt(e.top, d)}</span> : <span class="num">${fmt(size, d)}${u}</span> de trou. Le trait pointillé au milieu (<span class="num">${fmt(e.ce, d)}</span>) s'appelle le CE.` },
+    { upto: e.k - 1, gap: true, title: "Le prix s'éloigne", text: `On ne court pas après. On pose un <strong>ordre limite</strong> au haut du FVG et on attend que le prix revienne.` },
+    { upto: e.k, gap: true, trade: true, title: "Le prix revient : ordre rempli", text: `Achat à <span class="num">${fmt(e.top, d)}</span>. Stop sous la bougie 1 à <span class="num">${fmt(e.sl, d)}</span> (risque <span class="num">${fmt(risk, d)}${u}</span>). Objectif 2R à <span class="num">${fmt(e.tp, d)}</span>.` },
+  ];
+  if (kind === "win") s.push({ upto: e.m, gap: true, trade: true, done: "TP", title: "Le FVG tient : +2R", text: `Le FVG a servi de support. Le prix repart et touche l'objectif à <span class="num">${fmt(e.tp, d)}</span>. Gain = 2 fois le risque.` });
+  else {
+    s.push({ upto: e.inv, gap: true, trade: true, title: "Clôture sous le FVG", text: `Une bougie clôture sous <span class="num">${fmt(e.bot, d)}</span>. Le FVG est cassé : les acheteurs n'ont pas défendu la zone.` });
+    s.push({ upto: e.m, gap: true, inv: true, trade: true, done: "SL", title: "Stop touché : −1R", text: `Le stop à <span class="num">${fmt(e.sl, d)}</span> est touché. Perte limitée à 1R, c'est pour ça qu'on pose toujours le stop.` });
+    s.push({ upto: e.ohlc.length - 1, gap: true, inv: true, trade: true, done: "SL", title: "Le FVG devient un iFVG", text: `La zone change de rôle : elle devient une <strong>résistance</strong>. Quand le prix remonte dedans, les vendeurs la défendent.` });
+  }
+  return s;
+}
+function render() {
+  const e = D[ex], S = steps(e, ex), st = S[step], o = e.ohlc, n = o.length;
+  const W = 760, H = 360, P = { l: 10, r: 78, t: 18, b: 28 };
+  let lo = Math.min(...o.map(r => r[2]), e.sl), hi = Math.max(...o.map(r => r[1]), e.tp); const pad = (hi - lo) * .05; lo -= pad; hi += pad;
+  const cw = (W - P.l - P.r) / n, X = i => P.l + cw * (i + .5), XL = i => P.l + cw * i, Y = v => P.t + (H - P.t - P.b) * (hi - v) / (hi - lo);
+  const d = e.dec, f = v => v.toFixed(d > 3 ? 4 : d === 3 ? 2 : 1);
+  const vis = Math.min(shown, st.upto + 1);
+  let s = "";
+  for (let k = 0; k <= 4; k++) { const v = lo + (hi - lo) * k / 4, y = Y(v); s += `<line x1="${P.l}" x2="${W - P.r}" y1="${y}" y2="${y}" stroke="var(--rule)"/><text x="${W - P.r + 6}" y="${y + 4}" font-size="11" fill="var(--muted)">${f(v)}</text>`; }
+  if (st.gap) {
+    const x0 = XL(e.g - 2), x1 = XL(Math.max(vis, e.g + 1)) + 4;
+    s += `<rect x="${x0}" y="${Y(e.top)}" width="${Math.max(4, x1 - x0)}" height="${Y(e.bot) - Y(e.top)}" fill="${st.inv ? 'var(--inv)' : 'var(--gap)'}" stroke="${st.inv ? 'var(--bad)' : 'var(--gap-line)'}" ${st.inv ? 'stroke-dasharray="5 4"' : ''}/>`;
+    s += `<line x1="${x0}" x2="${x1}" y1="${Y(e.ce)}" y2="${Y(e.ce)}" stroke="${st.inv ? 'var(--bad)' : 'var(--gap-line)'}" stroke-dasharray="2 4"/>`;
+    s += `<text x="${x0 + 4}" y="${Y(e.bot) + 16}" font-size="12" font-weight="600" fill="${st.inv ? 'var(--bad)' : 'var(--gap-line)'}">${st.inv ? 'iFVG = résistance' : 'FVG'}</text>`;
+    s += `<text x="${W - P.r + 6}" y="${Y(e.top) + 4}" font-size="11" fill="var(--gap-line)">${f(e.top)}</text><text x="${W - P.r + 6}" y="${Y(e.bot) + 12}" font-size="11" fill="var(--gap-line)">${f(e.bot)}</text>`;
+  }
+  if (st.trade) {
+    const x0 = X(e.k), x1 = W - P.r;
+    s += `<line x1="${x0}" x2="${x1}" y1="${Y(e.top)}" y2="${Y(e.top)}" stroke="var(--entry)" stroke-width="2"/><text x="${x1 - 4}" y="${Y(e.top) - 6}" font-size="11" fill="var(--entry)" text-anchor="end">entrée ${f(e.top)}</text>`;
+    s += `<line x1="${x0}" x2="${x1}" y1="${Y(e.sl)}" y2="${Y(e.sl)}" stroke="var(--bad)" stroke-dasharray="6 4" stroke-width="2"/><text x="${x0}" y="${Y(e.sl) + 14}" font-size="11" fill="var(--bad)">stop ${f(e.sl)}</text>`;
+    s += `<line x1="${x0}" x2="${x1}" y1="${Y(e.tp)}" y2="${Y(e.tp)}" stroke="var(--ok)" stroke-dasharray="6 4" stroke-width="2"/><text x="${x0}" y="${Y(e.tp) - 6}" font-size="11" fill="var(--ok)">objectif 2R ${f(e.tp)}</text>`;
+  }
+  const wick = Math.max(1, cw * .12), bw = Math.max(2, cw * .6);
+  for (let i = 0; i < vis; i++) {
+    const r = o[i], up = r[3] >= r[0], col = up ? 'var(--up)' : 'var(--down)', x = X(i), y0 = Y(Math.max(r[0], r[3])), y1 = Y(Math.min(r[0], r[3]));
+    const hl = (st.mark1 || st.gap) && i >= e.g - 2 && i <= e.g && step < 5;
+    s += `<line x1="${x}" x2="${x}" y1="${Y(r[1])}" y2="${Y(r[2])}" stroke="${col}" stroke-width="${wick}"/><rect x="${x - bw / 2}" y="${y0}" width="${bw}" height="${Math.max(1, y1 - y0)}" fill="${col}" ${hl ? 'stroke="var(--ink)" stroke-width="1.5"' : ''}/>`;
+  }
+  if (st.mark1 && step < 5) { const r = o[e.g - 2]; s += `<line x1="${X(e.g - 2) - 14}" x2="${X(e.g + 2)}" y1="${Y(r[1])}" y2="${Y(r[1])}" stroke="var(--gap-line)" stroke-width="1.5"/><text x="${X(e.g - 2)}" y="${Y(r[1]) + 16}" font-size="11" fill="var(--gap-line)" text-anchor="middle">haut 1 · ${f(r[1])}</text>`; }
+  if (st.mark3 && step < 5) { const r = o[e.g]; s += `<line x1="${X(e.g - 2)}" x2="${X(e.g) + 14}" y1="${Y(r[2])}" y2="${Y(r[2])}" stroke="var(--gap-line)" stroke-width="1.5"/><text x="${X(e.g)}" y="${Y(r[2]) - 8}" font-size="11" fill="var(--gap-line)" text-anchor="middle">bas 3 · ${f(r[2])}</text>`; }
+  if ((st.mark1 || st.mark3) && step < 4) { [e.g - 2, e.g - 1, e.g].forEach((i, k) => { if (i < vis) s += `<text x="${X(i)}" y="${Y(o[i][2]) + 30}" font-size="12" font-weight="600" fill="var(--ink)" text-anchor="middle">${k + 1}</text>`; }); }
+  if (st.trade && vis > e.k) s += `<path d="M${X(e.k)} ${Y(o[e.k][2]) + 6} l6 9 h-12z" fill="var(--entry)"/>`;
+  if (st.done && vis > e.m) { const win = st.done === "TP"; s += `<text x="${X(e.m)}" y="${win ? Y(e.tp) - 22 : Y(e.sl) + 30}" font-size="15" font-weight="600" fill="${win ? 'var(--ok)' : 'var(--bad)'}" text-anchor="middle">${win ? '+2R ✓' : '−1R'}</text>`; }
+  const dt = t => t.slice(8, 10) + "/" + t.slice(5, 7);
+  [0, Math.floor(n / 2), n - 1].forEach((i, k) => s += `<text x="${X(i)}" y="${H - 8}" font-size="11" fill="var(--muted)" text-anchor="${k === 0 ? 'start' : k === 2 ? 'end' : 'middle'}">${dt(e.t[i])}</text>`);
+  $("chart").innerHTML = s;
+  $("meta").textContent = `${e.sym} · H4 · bougies réelles`;
+  const last = o[Math.max(0, vis - 1)]; $("price").textContent = `${e.t[Math.max(0, vis - 1)].replace("T", " ")} · clôture ${f(last[3])}`;
+  $("stepn").textContent = `Étape ${step + 1} / ${S.length}`; $("title").textContent = st.title; $("text").innerHTML = st.text;
+  $("dots").innerHTML = S.map((_, i) => `<span class="${i <= step ? 'on' : ''}"></span>`).join("");
+  $("prev").disabled = step === 0; $("next").disabled = step === S.length - 1;
+}
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function go(i) {
+  const S = steps(D[ex], ex); step = Math.max(0, Math.min(S.length - 1, i));
+  const target = S[step].upto + 1;
+  clearInterval(anim);
+  if (reduce || shown > target) { shown = target; render(); return; }
+  anim = setInterval(() => { if (shown < target) { shown++; render(); } else { clearInterval(anim); render(); } }, 110);
+  render();
+}
+function setPlay(on) {
+  playing = on; $("play").textContent = on ? "❚❚ Pause" : "▶ Lecture"; clearInterval(timer);
+  if (on) timer = setInterval(() => { const S = steps(D[ex], ex); if (step < S.length - 1) go(step + 1); else setPlay(false); }, 2600);
+}
+function load(k) { ex = k; shown = 0; $("tab-win").setAttribute("aria-pressed", k === "win"); $("tab-fail").setAttribute("aria-pressed", k === "fail"); go(0); }
+$("prev").onclick = () => { setPlay(false); shown = 0; go(step - 1); };
+$("next").onclick = () => { setPlay(false); go(step + 1); };
+$("play").onclick = () => { const S = steps(D[ex], ex); if (step === S.length - 1) { shown = 0; go(0); } setPlay(!playing); };
+$("restart").onclick = () => { shown = 0; go(0); setPlay(!reduce); };
+$("tab-win").onclick = () => { load("win"); setPlay(!reduce); };
+$("tab-fail").onclick = () => { load("fail"); setPlay(!reduce); };
+const st = D.stats;
+$("facts").innerHTML = [
+  [st.win, "FVG gagnants à 2R", `${st.n.toLocaleString('fr-FR')} FVG H4 · 11 paires + or · 2012-2022`],
+  [st.top_win, "Le prix touche le FVG sans aller au milieu", `${st.top_n.toLocaleString('fr-FR')} cas`],
+  [st.ce_win, "Le prix descend jusqu'au CE (50 %)", `${st.ce_n.toLocaleString('fr-FR')} cas · zone qui faiblit`],
+].map(([v, l, m]) => `<div class="fact"><span class="big" style="color:${v >= 36 ? 'var(--ok)' : v >= 31 ? 'var(--entry)' : 'var(--bad)'}">${v.toFixed(1)} %</span><span class="lab">${l}</span><span class="lab" style="font-size:13px">${m}</span></div>`).join("");
+$("foot").innerHTML = `Avec un objectif à 2R, il faut gagner <strong>33,3 %</strong> des trades pour finir à zéro, avant frais. Joué seul, le FVG est donc à l'équilibre. Repère utile : quand le prix s'enfonce jusqu'au CE, la zone tient moins souvent. Les deux exemples sont de vraies bougies XAUUSD H4 (prix historiques). Résultats passés, pas une promesse.`;
+load("win"); setPlay(!reduce);
+</script>
