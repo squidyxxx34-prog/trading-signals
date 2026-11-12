@@ -1,0 +1,12 @@
+import pandas as pd, matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
+T=pd.read_csv("evening_trades.csv",parse_dates=["t"]).sort_values("t")
+eq=6000*(1+0.005*T.R.cumsum())
+fig,ax=plt.subplots(figsize=(10,5.2),dpi=150); fig.patch.set_facecolor("#0d0d0f"); ax.set_facecolor("#0d0d0f")
+ax.plot(T.t,eq,color="#4fc3f7",lw=2.2); ax.fill_between(T.t,6000,eq,color="#4fc3f7",alpha=.12)
+ax.axhline(6000,color="#888",lw=.8,ls="--"); ax.axhline(5640,color="#ff5252",lw=1,ls="--"); ax.text(T.t.iloc[0],5655,"plancher FundedNext 5 640 $",color="#ff5252",fontsize=8)
+for s in ax.spines.values(): s.set_visible(False)
+ax.tick_params(colors="#bbb"); ax.grid(color="#222")
+ax.set_title("Connors RSI-2 sur indices (US500 · NAS100 · US30 · GER40) — nov. 2022 → nov. 2026\n185 trades · 70 % gagnants · PF 1,80 · risque 0,5 %/trade sur 6 000 $",color="white",fontsize=11,loc="left")
+ax.text(T.t.iloc[-1],eq.iloc[-1],f"  {eq.iloc[-1]:,.0f} $".replace(","," "),color="#4fc3f7",fontsize=11,fontweight="bold",va="center")
+plt.tight_layout(); plt.savefig("connors_indices_4ans.png",facecolor=fig.get_facecolor())
+print(eq.iloc[-1], (eq-eq.cummax()).min())
