@@ -1,0 +1,127 @@
+//@version=6
+indicator("Entrée à temps · RSI-2 (zone, SL, TP auto)", "Entrée à temps", overlay = true, max_boxes_count = 100, max_lines_count = 300, max_labels_count = 300)
+
+// ═══════════════ Réglages ═══════════════
+gS = "Signal (Connors RSI-2)"
+iRsiLen  = input.int(2, "Longueur RSI", minval = 2, group = gS)
+iBuyLvl  = input.float(10, "BUY si RSI <", group = gS)
+iSellLvl = input.float(90, "SELL si RSI >", group = gS)
+iTrend   = input.int(200, "Filtre de tendance (SMA)", group = gS)
+iShort   = input.bool(false, "Autoriser les SELL (perdants en backtest)", group = gS)
+
+gR = "SL / TP / retard"
+iSlAtr  = input.float(2.0, "Stop = x ATR(14)", step = 0.1, group = gR)
+iTpMode = input.string("Moyenne 5 (backtesté)", "Take profit", options = ["Moyenne 5 (backtesté)", "R fixe"], group = gR)
+iTpR    = input.float(0.75, "TP en R (mode R fixe)", step = 0.05, group = gR)
+iMinRR  = input.float(0.35, "R:R minimum pour entrer en retard", step = 0.05, group = gR, tooltip = "Si le prix a déjà trop avancé vers le TP et que le R:R restant tombe sous ce seuil, c'est trop tard.")
+iBars   = input.int(1, "Fenêtre d'entrée (bougies après le signal)", minval = 1, group = gR)
+iHold   = input.int(10, "Durée max du trade (bougies)", minval = 1, group = gR)
+
+gT = "Taille / affichage"
+iAcct     = input.float(6000, "Capital ($)", group = gT)
+iRisk     = input.float(0.5, "Risque par trade (%)", step = 0.1, group = gT)
+iContract = input.float(0, "Unités par lot (0 = auto)", group = gT, tooltip = "Auto : forex 100 000 · XAU 100 · XAG 5 000 · indices 1. Calcul approx. pour les actifs cotés en USD.")
+iPos      = input.string("bottom_right", "Position du tableau", options = ["top_right", "bottom_right", "bottom_left", "top_left"], group = gT)
+iShowSma  = input.bool(true, "Afficher la SMA de tendance", group = gT)
+
+// ═══════════════ Calculs ═══════════════
+r2   = ta.rsi(close, iRsiLen)
+sTr  = ta.sma(close, iTrend)
+s5   = ta.sma(close, 5)
+atr14 = ta.atr(14)
+plot(iShowSma ? sTr : na, "SMA tendance", color.new(color.gray, 40))
+
+buySig  = barstate.isconfirmed and close > sTr and r2 < iBuyLvl
+sellSig = barstate.isconfirmed and iShort and close < sTr and r2 > iSellLvl
+
+contract = iContract > 0 ? iContract : syminfo.type == "forex" ? 100000.0 : str.contains(syminfo.ticker, "XAU") ? 100.0 : str.contains(syminfo.ticker, "XAG") ? 5000.0 : 1.0
+
+var int    dir    = 0
+var int    sigBar = 0
+var float  ent    = na
+var float  sl     = na
+var float  tp     = na
+var float  lim    = na
+var float  risk   = na
+var string fin    = ""
+var line   lSl    = na
+var line   lTp    = na
+
+// ── suivi du trade en cours
+if dir != 0 and fin == "" and bar_index > sigBar
+    if (dir == 1 and low <= sl) or (dir == -1 and high >= sl)
+        fin := "🛑 Stop touché"
+    else if (dir == 1 and high >= tp) or (dir == -1 and low <= tp)
+        fin := "🎯 TP atteint"
+    else if bar_index - sigBar >= iHold and barstate.isconfirmed
+        fin := "⌛ " + str.tostring(iHold) + " bougies : sortie à la clôture"
+    if fin == ""
+        int x2 = math.max(bar_index + 1, sigBar + iBars)
+        line.set_x2(lSl, x2)
+        line.set_x2(lTp, x2)
+
+// ── nouveau signal
+newSig = (buySig or sellSig) and not (dir != 0 and fin == "")
+if newSig
+    dir    := buySig ? 1 : -1
+    sigBar := bar_index
+    ent    := close
+    risk   := iSlAtr * atr14
+    sl     := ent - dir * risk
+    float tgt     = iTpMode == "R fixe" ? ent + dir * iTpR * risk : s5
+    float floorTp = ent + dir * (iMinRR + 0.15) * risk
+    tp     := dir == 1 ? math.max(tgt, floorTp) : math.min(tgt, floorTp)
+    lim    := (tp + iMinRR * sl) / (1 + iMinRR)          // prix où le R:R restant = minimum
+    fin    := ""
+    color c   = dir == 1 ? color.teal : color.red
+    float zTop = dir == 1 ? lim : ent + 0.25 * risk
+    float zBot = dir == 1 ? ent - 0.25 * risk : lim
+    box.new(bar_index, zTop, bar_index + iBars, zBot, border_color = color.new(c, 20), bgcolor = color.new(c, 75), text = "ENTRÉE OK", text_color = color.white, text_size = size.small)
+    line.new(bar_index, lim, bar_index + iBars, lim, color = color.orange, style = line.style_dashed)
+    lSl := line.new(bar_index, sl, bar_index + iBars, sl, color = color.red, width = 2)
+    lTp := line.new(bar_index, tp, bar_index + iBars, tp, color = color.lime, width = 2)
+    label.new(bar_index, dir == 1 ? low : high, dir == 1 ? "BUY" : "SELL", style = dir == 1 ? label.style_label_up : label.style_label_down, color = c, textcolor = color.white, size = size.small)
+    alert(syminfo.ticker + " " + (dir == 1 ? "BUY" : "SELL") + " | entrée " + str.tostring(ent, format.mintick) + " (max " + str.tostring(lim, format.mintick) + ") | SL " + str.tostring(sl, format.mintick) + " | TP " + str.tostring(tp, format.mintick), alert.freq_once_per_bar_close)
+
+// ═══════════════ Tableau ═══════════════
+f_dur(float m) =>
+    m <= 0 ? "0 min" : m >= 1440 ? str.tostring(math.floor(m / 1440)) + " j " + str.tostring(math.floor((m % 1440) / 60)) + " h" : m >= 60 ? str.tostring(math.floor(m / 60)) + " h " + str.tostring(math.floor(m % 60)) + " min" : str.tostring(math.floor(m)) + " min"
+
+pos = iPos == "top_right" ? position.top_right : iPos == "bottom_left" ? position.bottom_left : iPos == "top_left" ? position.top_left : position.bottom_right
+var table tb = table.new(pos, 2, 9, bgcolor = color.new(color.black, 15), border_width = 1, border_color = color.new(color.gray, 70))
+
+f_row(int r, string a, string b, color cb) =>
+    table.cell(tb, 0, r, a, text_color = color.silver, text_size = size.small, text_halign = text.align_left)
+    table.cell(tb, 1, r, b, text_color = cb, text_size = size.small, text_halign = text.align_right)
+
+if barstate.islast
+    string st    = ""
+    color  sc    = color.gray
+    float  rrNow = na
+    float  left  = na
+    bool   open_ = dir != 0 and fin == "" and bar_index - sigBar <= iBars
+    if dir == 0
+        st := "Aucun signal récent"
+    else if fin != ""
+        st := fin
+    else if not open_
+        st := "Fenêtre fermée (trade en cours si tu es dedans)"
+        sc := color.yellow
+    else
+        rrNow := dir == 1 ? (tp - close) / math.max(close - sl, syminfo.mintick) : (close - tp) / math.max(sl - close, syminfo.mintick)
+        bool ok = dir == 1 ? close <= lim : close >= lim
+        st := ok ? (dir == 1 ? "✅ BUY encore OK" : "✅ SELL encore OK") : "⛔ Trop tard : attends " + (dir == 1 ? "≤ " : "≥ ") + str.tostring(lim, format.mintick)
+        sc := ok ? color.lime : color.orange
+        left := (sigBar + iBars - bar_index) * timeframe.in_seconds() / 60.0 + (time_close - timenow) / 60000.0
+    float riskUsd = iAcct * iRisk / 100
+    float dist    = open_ ? math.abs(close - sl) : math.abs(ent - sl)
+    float lots    = dir != 0 and dist > 0 ? riskUsd / (dist * contract) : na
+    f_row(0, "Entrée à temps · " + (dir == 1 ? "BUY" : dir == -1 ? "SELL" : "—"), st, sc)
+    f_row(1, "Entrée idéale (clôture signal)", dir != 0 ? str.tostring(ent, format.mintick) : "—", color.white)
+    f_row(2, "Entrée max (au-delà = trop tard)", dir != 0 ? str.tostring(lim, format.mintick) : "—", color.orange)
+    f_row(3, "Stop loss", dir != 0 ? str.tostring(sl, format.mintick) : "—", color.red)
+    f_row(4, "Take profit", dir != 0 ? str.tostring(tp, format.mintick) : "—", color.lime)
+    f_row(5, "R:R si j'entre maintenant", na(rrNow) ? "—" : str.tostring(rrNow, "#.##"), na(rrNow) ? color.gray : rrNow >= iMinRR ? color.lime : color.orange)
+    f_row(6, "Lots (risque " + str.tostring(riskUsd, "#") + " $)", na(lots) ? "—" : str.tostring(lots, "#.##"), color.white)
+    f_row(7, "Temps restant pour entrer", na(left) ? "—" : f_dur(left), color.white)
+    f_row(8, "Backtest D1 indices 2022-26", timeframe.isdaily ? "68 % gagnants · PF 1,5" : "⚠️ validé en D1 seulement", timeframe.isdaily ? color.silver : color.orange)
