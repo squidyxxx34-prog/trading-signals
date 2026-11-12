@@ -26,6 +26,10 @@
 //     FVG, en killzone, dans le sens du biais.
 //   « BUY LIMIT » = ordre à placer · « BUY » = ordre rempli · +xR / -1R = sortie.
 //
+//  v2.3 : filtre tendance 6 mois (> 10 %). Backtest or M15, frais inclus :
+//   2012-22 PF 1,13 (112 trades) · 2022-26 PF 1,47 (200 trades). Sans filtre : 0,88.
+//   H1 : trop peu de trades (35-44) pour conclure. Forex : perdant avec ou sans filtre.
+//
 //  CRÉDIBILITÉ : chaque signal est suivi en walk-forward (aucune donnée future,
 //  calcul à la clôture, pas de TP sur la bougie d'entrée, SL prioritaire si SL
 //  et TP sur la même bougie, gaps à l'open, frais déduits). Le tableau compare
@@ -33,7 +37,7 @@
 //  risque) : si les signaux ne battent pas le placebo, l'edge n'existe pas sur
 //  cet actif / ce timeframe, et le tableau le dit.
 // ════════════════════════════════════════════════════════════════════════════
-indicator("SMC Pro v2", shorttitle = "SMC Pro v2", overlay = true, max_labels_count = 500, max_boxes_count = 500, max_lines_count = 500, max_bars_back = 1000)
+indicator("SMC Pro v2.3", shorttitle = "SMC Pro v2.3", overlay = true, max_labels_count = 500, max_boxes_count = 500, max_lines_count = 500, max_bars_back = 1000)
 
 // ─── INPUTS ─────────────────────────────────────────────────────────────────
 G1 = "Signaux BUY / SELL"
@@ -56,6 +60,9 @@ iHtfTf    = input.timeframe("D", "Timeframe HTF", group = G2)
 iHtfLen   = input.int(50, "EMA HTF", minval = 5, group = G2)
 iUseSwing = input.bool(true, "Filtre structure swing", group = G2)
 iKzRev    = input.bool(true, "Reversal A+ : MSS en killzone uniquement", group = G2)
+iUseMom   = input.bool(true, "Filtre tendance 6 mois (backtest : indispensable sur l'or)", group = G2)
+iMomLen   = input.int(126, "Tendance : nombre de jours", minval = 20, group = G2)
+iMomMin   = input.float(10.0, "Tendance : variation min (%)", minval = 0.0, step = 1.0, group = G2, tooltip = "Signaux seulement dans le sens d'une variation > X % sur la période (or M15 2012-26 : PF 0,88 sans filtre → 1,13 / 1,47 avec)")
 
 G3 = "Structure"
 iLint   = input.int(3, "Pivots internes", minval = 2, maxval = 10, group = G3)
@@ -112,6 +119,14 @@ f_htf() =>
 htfRaw   = request.security(syminfo.tickerid, iHtfTf, f_htf(), lookahead = barmerge.lookahead_on)
 htfOn    = iUseHtf and timeframe.in_seconds() < timeframe.in_seconds(iHtfTf)
 htfBias  = htfOn ? nz(htfRaw) : 0
+
+// Filtre tendance 6 mois (variation du dernier jour CLÔTURÉ vs N jours avant → aucun repaint)
+f_mom() =>
+    m = close / close[iMomLen] - 1
+    m[1]
+momRaw = request.security(syminfo.tickerid, "D", f_mom(), lookahead = barmerge.lookahead_on)
+momDir = not iUseMom ? 0 : nz(momRaw) > iMomMin / 100 ? 1 : nz(momRaw) < -iMomMin / 100 ? -1 : 0
+momOk(int d) => not iUseMom or momDir == d
 
 // Marchés autorisés pour les notifications (forex / métaux / CFD)
 string tk = str.upper(syminfo.ticker)
@@ -348,7 +363,7 @@ f_arm(int d, int prevT, int pivB, float liq, float a) =>
     float zb = na
     int   eo = 0
     bool  swept = false
-    bool biasOk = (not iUseSwing or tSw == d) and (not htfOn or htfBias == d)
+    bool biasOk = (not iUseSwing or tSw == d) and (not htfOn or htfBias == d) and momOk(d)
     if biasOk and bar_index > pivB
         [eo_, ext] = f_legExtreme(d, pivB)
         eo := eo_
@@ -734,9 +749,9 @@ if barstate.isconfirmed and not na(atr)
                     array.remove(zB, i)
     if bar_index % iPlStep == 0 and bar_index > 250 and array.size(zE) < 300
         int d = 0
-        if (not iUseSwing or tSw == 1) and (not htfOn or htfBias == 1) and (iUseSwing or htfOn)
+        if (not iUseSwing or tSw == 1) and (not htfOn or htfBias == 1) and momOk(1) and (iUseSwing or htfOn)
             d := 1
-        else if (not iUseSwing or tSw == -1) and (not htfOn or htfBias == -1) and (iUseSwing or htfOn)
+        else if (not iUseSwing or tSw == -1) and (not htfOn or htfBias == -1) and momOk(-1) and (iUseSwing or htfOn)
             d := -1
         else if not iUseSwing and not htfOn
             d := int(math.floor(bar_index / iPlStep)) % 2 == 0 ? 1 : -1
@@ -821,11 +836,11 @@ if iShowTable and barstate.islast
     f_cell(0, 6, verdict, vc, size.small)
     float totR = array.get(sWin, 2) - array.get(sLoss, 2)
     f_cell(0, 7, "Résultat des signaux : " + f_sgn(totR, "#.#") + " R ≈ " + f_sgn(totR * iCapital * iRiskPct / 100, "#") + " (risque " + str.tostring(iRiskPct) + " % de " + str.tostring(iCapital, "#") + ")", totR >= 0 ? cBull : cBear, size.small)
-    string bTxt = "Biais HTF " + iHtfTf + " : " + (not htfOn ? "off" : htfBias == 1 ? "▲ haussier" : htfBias == -1 ? "▼ baissier" : "neutre") + "  ·  Swing : " + (tSw == 1 ? "▲" : tSw == -1 ? "▼" : "-") + "  ·  Interne : " + (tInt == 1 ? "▲" : tInt == -1 ? "▼" : "-")
+    string bTxt = "Biais HTF " + iHtfTf + " : " + (not htfOn ? "off" : htfBias == 1 ? "▲ haussier" : htfBias == -1 ? "▼ baissier" : "neutre") + "  ·  Swing : " + (tSw == 1 ? "▲" : tSw == -1 ? "▼" : "-") + "  ·  Interne : " + (tInt == 1 ? "▲" : tInt == -1 ? "▼" : "-") + (iUseMom ? "  ·  6 mois : " + str.tostring(nz(momRaw) * 100, "#.#") + " %" : "")
     f_cell(0, 8, bTxt, color.white, size.tiny)
     string oTxt = pDir != 0 ? "Ordre actif : " + (pDir == 1 ? "BUY" : "SELL") + " LIMIT " + str.tostring(pE, format.mintick) + " · SL " + str.tostring(pSl, format.mintick) + " · TP " + str.tostring(pTp, format.mintick) + " · taille ≈ " + str.tostring(iCapital * iRiskPct / 100 / math.abs(pE - pSl), "#.####") : qDir != 0 ? "Position : " + (qDir == 1 ? "LONG" : "SHORT") + " depuis " + str.tostring(qE, format.mintick) + " · SL " + str.tostring(qSt, format.mintick) + (iExit == "TP fixe" ? " · TP " + str.tostring(qTp, format.mintick) : "") : "Aucun ordre actif"
     f_cell(0, 9, oTxt, pDir == 1 or qDir == 1 ? cBull : pDir == -1 or qDir == -1 ? cBear : cGray, size.tiny)
-    string tfWarn = timeframe.in_seconds() < 3600 ? "⚠ < 1h : les frais mangent 20-30 % du risque → préfère 1h / 4h · " : ""
+    string tfWarn = timeframe.in_seconds() < 900 ? "⚠ < 15 min : les frais mangent l'edge → M15 minimum · " : ""
     f_cell(0, 10, tfWarn + "Entrée " + iEntry + " · SL extrême + " + str.tostring(iSlBuf) + " ATR · " + (iExit == "TP fixe" ? "TP " + str.tostring(iRR) + "R" : "stop suiveur " + str.tostring(iTrailM) + " ATR") + " · frais " + str.tostring(iFee) + " % · résultats passés ≠ futurs", tfWarn != "" ? color.orange : cGray, size.tiny)
 
 // ─── CONSIGNE « QUOI FAIRE » ────────────────────────────────────────────────
@@ -833,9 +848,9 @@ var label actLb = na
 if iShowAct and barstate.islast
     label.delete(actLb)
     int bd = 0
-    if (iUseSwing or htfOn) and (not iUseSwing or tSw == 1) and (not htfOn or htfBias == 1)
+    if (iUseSwing or htfOn) and (not iUseSwing or tSw == 1) and (not htfOn or htfBias == 1) and momOk(1)
         bd := 1
-    else if (iUseSwing or htfOn) and (not iUseSwing or tSw == -1) and (not htfOn or htfBias == -1)
+    else if (iUseSwing or htfOn) and (not iUseSwing or tSw == -1) and (not htfOn or htfBias == -1) and momOk(-1)
         bd := -1
     int   nA = array.get(sN, 2)
     bool  noEdge = nA >= 30 and f_avg(2) <= 0
@@ -851,7 +866,7 @@ if iShowAct and barstate.islast
         act := "▶ PLACE UN " + (pDir == 1 ? "BUY" : "SELL") + " LIMIT à " + str.tostring(pE, format.mintick) + "\nSL " + str.tostring(pSl, format.mintick) + " · TP " + str.tostring(pTp, format.mintick) + "\nTaille ≈ " + str.tostring(rc / math.abs(pE - pSl), "#.####") + " (risque " + str.tostring(rc, "#") + ") · annule après " + str.tostring(math.max(iMaxWait - (bar_index - pBar), 0)) + " bougies"
         ac := pDir == 1 ? cBull : cBear
     else if bd == 0
-        act := "⏸ RIEN À FAIRE\nBiais contradictoires (HTF " + (htfBias == 1 ? "▲" : htfBias == -1 ? "▼" : "-") + " / swing " + (tSw == 1 ? "▲" : tSw == -1 ? "▼" : "-") + ")\nOn attend qu'ils soient d'accord"
+        act := "⏸ RIEN À FAIRE\nBiais contradictoires (HTF " + (htfBias == 1 ? "▲" : htfBias == -1 ? "▼" : "-") + " / swing " + (tSw == 1 ? "▲" : tSw == -1 ? "▼" : "-") + (iUseMom ? " / 6 mois " + (momDir == 1 ? "▲" : momDir == -1 ? "▼" : "plat") : "") + ")\nOn attend qu'ils soient d'accord"
     else
         act := "⏸ ATTENDRE un " + (bd == 1 ? "BUY" : "SELL") + "\nBiais " + (bd == 1 ? "▲ haussier" : "▼ baissier") + " : il faut une cassure " + (bd == 1 ? "haussière" : "baissière") + "\nqui laisse un FVG → l'ordre s'affichera ici"
         ac := color.new(bd == 1 ? cBull : cBear, 40)
