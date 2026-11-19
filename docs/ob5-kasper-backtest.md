@@ -23,3 +23,6 @@ OB = bougie 1 du FVG (bougie 1 ne touche pas bougie 3), Supertrend(10,3) sans ra
 | 4h | 739 | 34,1 % | +0,02R | 61 | 42,6 % | +0,28R |
 
 Seuil de rentabilité à 2R = 33,3 %. Verdict : ≈ break-even sans frais ; seul le 5 étoiles 4h sort du lot, mais sur 61 trades.
+
+## V3 — 5 minutes (UT de Kasper), règles exactes, sans frais
+12 perps, nov 2023 → oct 2026. Règle ≥4 étoiles : 38 940 trades, WR 2R 33,1 %, −0,007R. 5 étoiles : 2 164 trades, WR 2R 32,4 %, −0,03R. WR 1R ≈ 49,6 %. = pile ou face.
