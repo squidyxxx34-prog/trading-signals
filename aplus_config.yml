@@ -1,7 +1,7 @@
 # Alertes A+ crypto (aplus_bot.py) — setup backtesté le 18 nov 2026 (voir docs/aplus-backtest.md)
 
 # Univers : tous les perps USDT de Bitget (prix ≈ Bybit, donc ≈ Hyro). Bybit et Binance bloquent GitHub Actions.
-min_volume_24h_usdt: 0        # 0 = tous les perps. Mets 1000000 pour ignorer les perps quasi morts.
+min_volume_24h_usdt: 5000000  # perps à moins de 5 M$/24h ignorés : prix Bitget trop différents de Bybit/Hyro (0 = tous)
 whitelist_file: aplus_symbols.txt   # si ce fichier existe et n'est pas vide : seulement ces symboles (ex. ta liste Hyro)
 
 # Taille affichée dans l'alerte

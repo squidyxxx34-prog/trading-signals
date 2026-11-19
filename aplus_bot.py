@@ -67,10 +67,15 @@ def candles(sym, now_ms):
     if not data:
         return None
     d = pd.DataFrame([r[:5] for r in data], columns=["t", "o", "h", "l", "c"]).astype(float)
+    live = d[d.t + TF_MS > now_ms]                    # bougie en cours (pas utilisée par le moteur)
     d = d[d.t + TF_MS <= now_ms]                      # bougies fermées uniquement
     d = d.drop_duplicates("t").sort_values("t")
     d["t"] = pd.to_datetime(d.t.astype("int64"), unit="ms", utc=True)
-    return d if len(d) >= 300 else None
+    if len(d) < 300:
+        return None
+    d.attrs["live_h"] = float(live.h.max()) if len(live) else None
+    d.attrs["live_l"] = float(live.l.min()) if len(live) else None
+    return d
 
 
 # ---------- notifications ----------
@@ -164,6 +169,10 @@ def run_once(dry=False):
             i_sig = int(i_sig)
             if issue != 0 or i_sig < n - 1 - max_age:     # ordre déjà rempli/annulé ou trop vieux
                 continue
+            # depuis la dernière clôture, le prix a-t-il déjà touché l'entrée ou le TP ? -> trop tard
+            lh, ll = d.attrs.get("live_h"), d.attrs.get("live_l")
+            if lh is not None and ((side == 1 and (ll <= entry or lh >= tp)) or (side == -1 and (lh >= entry or ll <= tp))):
+                print(sym, "ignoré : entrée ou TP déjà touché dans la bougie en cours"); continue
             t_sig = x["t"].iloc[i_sig]
             key = f"{sym}"
             if state.get(key, "") >= str(t_sig):
