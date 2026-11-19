@@ -1,0 +1,19 @@
+# Alertes A+ crypto (aplus_bot.py) — setup backtesté le 18 nov 2026 (voir docs/aplus-backtest.md)
+
+# Univers : tous les perps USDT de Bitget (prix ≈ Bybit, donc ≈ Hyro). Bybit et Binance bloquent GitHub Actions.
+min_volume_24h_usdt: 0        # 0 = tous les perps. Mets 1000000 pour ignorer les perps quasi morts.
+whitelist_file: aplus_symbols.txt   # si ce fichier existe et n'est pas vide : seulement ces symboles (ex. ta liste Hyro)
+
+# Taille affichée dans l'alerte
+risk_usd: 25                  # 0,5 % d'un compte de 5 000 $
+leverage: 5                   # levier conseillé (la taille ne change pas, seule la marge bloquée change)
+
+# Règles du setup (NE PAS changer sans re-backtester : c'est la seule version positive)
+timeframe: 1H
+use_bias: 1                   # tendance de fond EMA 200/800 bougies 1h
+use_session: 1                # CHoCH entre 7h et 20h UTC
+min_rr: 2.0                   # TP = liquidité opposée la plus proche, ignoré si < 2R
+order_valid_hours: 16         # info dans l'alerte (le moteur annule après 16 bougies)
+
+# Alerte envoyée si le signal a au plus N bougies (rattrape un run GitHub retardé) et que l'ordre est encore valable
+max_signal_age_bars: 2

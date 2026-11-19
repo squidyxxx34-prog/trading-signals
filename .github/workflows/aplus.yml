@@ -1,0 +1,42 @@
+name: A+ crypto alerts
+
+# Setup A+ (sweep -> CHoCH -> FVG, filtres tendance + horaires) sur tous les perps USDT.
+# 1 scan par heure, 2 min après la clôture de la bougie 1h. Crypto = 7j/7.
+on:
+  schedule:
+    - cron: "2 * * * *"
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Envoyer une notif de test"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aplus-${{ inputs.test && 'test' || 'scan' }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install pandas numpy requests pyyaml numba
+      - name: Scan A+
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          git config user.name "alert-bot"
+          git config user.email "alert-bot@users.noreply.github.com"
+          python aplus_bot.py ${{ inputs.test && '--test' || '' }}

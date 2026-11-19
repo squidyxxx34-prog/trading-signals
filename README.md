@@ -24,3 +24,20 @@ Capital, risque, timeframe, indices, nb d'actions, paramètres de l'indicateur.
 ## Limites
 - Données Yahoo : l'or (GC=F, futures) et certains indices hors US arrivent avec du retard → 2e scan 5 min après la clôture pour les rattraper. Un signal de plus de 30 min est ignoré.
 - Prix Yahoo ≠ prix de ton broker (surtout l'or futures vs spot) : SL/TP = distances ATR, recalcule-les depuis ton entrée réelle sur MT5.
+
+---
+
+# Alertes A+ crypto (`aplus_bot.py`)
+
+Le setup A+ appris en manuel (sweep d'une liquidité importante → CHoCH avec FVG → ordre limite au retest,
+SL derrière le sweep, TP sur la liquidité opposée ≥ 2R, filtres tendance + horaires), scanné **chaque heure
+sur tous les perps USDT** (prix Bitget ≈ Bybit = Hyro ; Bybit et Binance bloquent GitHub). ~4 alertes/jour.
+
+Chaque notif = ordre à placer : entrée limite, SL, TP, R, taille pour ton risque, marge au levier choisi.
+
+- Même secret `NTFY_TOPIC` que les autres alertes. Test : **Actions → A+ crypto alerts → Run workflow → test**.
+- Réglages : `aplus_config.yml` (risque $, levier, volume minimum). Liste Hyro perso : crée `aplus_symbols.txt`
+  (un symbole par ligne, ex. `HYPEUSDT`) → seules ces paires sont scannées.
+- Résultats du backtest : `docs/aplus-backtest.md`. Avantage faible (+0,15 R/trade, non significatif) :
+  valide chaque alerte à la main et note-la dans ton journal.
+- En local : `python aplus_bot.py --dry` (affiche sans envoyer).
