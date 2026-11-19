@@ -12,3 +12,14 @@ Entrée limite au bord de l'OB, SL de l'autre côté de l'OB.
 | 4h | 5 ét. | 137 | 51,8 % | 35,0 % | −0,01R |
 
 Sans frais, 1h 5 étoiles en 2R = +0,06R. Les étoiles améliorent un peu (+2-3 pts de WR) mais on est loin des 70 % annoncés. Verdict : pas d'avantage exploitable seul.
+
+## V2 — règles exactes de la vidéo, sans frais (`backtests/ob5/ob5k.py`)
+OB = bougie 1 du FVG (bougie 1 ne touche pas bougie 3), Supertrend(10,3) sans range, liquidité non prise ≤2 ATR derrière, OB vierge, OB entier en premium/discount (Fibo haut/bas de marché). Entrée à la clôture de la 1re bougie de réaction dans l'OB, SL derrière l'OB, TP 2R.
+
+| TF | Règle ≥4 ét. n | WR 2R | Exp 2R | 5 ét. n | WR 2R | Exp 2R |
+|---|---|---|---|---|---|---|
+| 15m | 12276 | 32,6 % | −0,02R | 725 | 34,6 % | +0,04R |
+| 1h | 2930 | 33,6 % | +0,01R | 195 | 35,9 % | +0,08R |
+| 4h | 739 | 34,1 % | +0,02R | 61 | 42,6 % | +0,28R |
+
+Seuil de rentabilité à 2R = 33,3 %. Verdict : ≈ break-even sans frais ; seul le 5 étoiles 4h sort du lot, mais sur 61 trades.
