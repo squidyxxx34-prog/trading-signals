@@ -26,3 +26,8 @@ Seuil de rentabilité à 2R = 33,3 %. Verdict : ≈ break-even sans frais ; seul
 
 ## V3 — 5 minutes (UT de Kasper), règles exactes, sans frais
 12 perps, nov 2023 → oct 2026. Règle ≥4 étoiles : 38 940 trades, WR 2R 33,1 %, −0,007R. 5 étoiles : 2 164 trades, WR 2R 32,4 %, −0,03R. WR 1R ≈ 49,6 %. = pile ou face.
+
+## V4 — Or / argent 5 min (proxys CFD), règles exactes, sans frais
+Dukascopy bloqué → XAUUSDT perp (déc 2025→), XAGUSDT perp (jan 2026→), PAXG spot (nov 2023→).
+Règle ≥4 étoiles : 3 109 trades, WR 1R 50,3 %, WR 2R 34,1 %, +0,02R. 5 étoiles : 154 trades, WR 2R 37 %, +0,11R (échantillon trop petit).
+XAU perp seul ≥4 ét. : 788 trades, WR 2R 33,2 %, −0,005R. Verdict : un poil mieux que la crypto, toujours ≈ break-even, loin des 70 %.
